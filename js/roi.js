@@ -70,6 +70,7 @@ export function createRoiController({
   };
 
   let sizeLocked = false;
+  let sessionSizeForced = false;
 
   let dragging = false;
   let resizing = false;
@@ -163,7 +164,7 @@ export function createRoiController({
      ROI 초기 상태
   ========================= */
 
-  function reset() {
+  function reset(options = {}) {
     if (!imageElement) {
       throw new Error(
         "ROI를 설정할 이미지가 없습니다."
@@ -171,6 +172,7 @@ export function createRoiController({
     }
 
     sizeLocked = false;
+    sessionSizeForced = false;
     dragging = false;
 
     widthInput.disabled = false;
@@ -188,6 +190,31 @@ export function createRoiController({
 
     const imageHeight =
       getImageHeight();
+
+    const fixedSize = options.fixedSize || null;
+    if (fixedSize && Number.isFinite(Number(fixedSize.width)) && Number.isFinite(Number(fixedSize.height))) {
+      const forcedWidth = Math.min(Math.max(MINIMUM_ROI_SIZE, Math.round(Number(fixedSize.width))), imageWidth);
+      const forcedHeight = Math.min(Math.max(MINIMUM_ROI_SIZE, Math.round(Number(fixedSize.height))), imageHeight);
+      roi.width = forcedWidth;
+      roi.height = forcedHeight;
+      roi.x = Math.round((imageWidth - roi.width) / 2);
+      roi.y = Math.round((imageHeight - roi.height) / 2);
+      widthInput.value = roi.width;
+      heightInput.value = roi.height;
+      sizeLocked = true;
+      sessionSizeForced = true;
+      widthInput.disabled = true;
+      heightInput.disabled = true;
+      lockButton.disabled = true;
+      lockButton.textContent = "기준 세션 ROI 크기 고정됨";
+      confirmButton.disabled = false;
+      updateInformation();
+      showMessage(
+        `기준 세션 ROI 크기 ${roi.width} × ${roi.height}px가 강제 적용됩니다. 크기는 변경할 수 없고 위치만 이동할 수 있습니다.`,
+        "success"
+      );
+      return;
+    }
 
     const requestedWidth =
       normalizeInputValue(
@@ -256,24 +283,11 @@ export function createRoiController({
       return;
     }
 
-    // 고정된 상태에서 다시 누르면 크기 조정 모드로 전환합니다.
+    // 한 번 확정한 ROI 크기는 현재 기준 세션 동안 다시 변경할 수 없습니다.
     if (sizeLocked) {
-      sizeLocked = false;
-      dragging = false;
-      resizing = false;
-      resizeHandle = null;
-
-      widthInput.disabled = false;
-      heightInput.disabled = false;
-      lockButton.disabled = false;
-      lockButton.textContent = "ROI 크기 다시 고정";
-      confirmButton.disabled = true;
-
-      updateInformation();
-      draw();
       showMessage(
-        "크기 조정 모드입니다. 숫자를 입력하거나 노란색 조절점을 드래그하세요.",
-        ""
+        "ROI 크기는 이 기준 세션 동안 고정됩니다. 새 기준 세션을 시작할 때만 다시 설정할 수 있습니다.",
+        "success"
       );
       return;
     }
@@ -311,8 +325,8 @@ export function createRoiController({
     sizeLocked = true;
     widthInput.disabled = true;
     heightInput.disabled = true;
-    lockButton.disabled = false;
-    lockButton.textContent = "ROI 크기 다시 조정";
+    lockButton.disabled = true;
+    lockButton.textContent = "ROI 크기 고정됨";
     confirmButton.disabled = false;
 
     saveRoiSize();
@@ -320,7 +334,7 @@ export function createRoiController({
     draw();
 
     showMessage(
-      "ROI 크기만 고정되었습니다. 스마트폰에서도 ROI 안쪽을 손가락으로 드래그하여 위치는 계속 이동할 수 있습니다.",
+      "ROI 크기가 이 기준 세션에 고정되었습니다. 이후 4시간 동안 같은 크기가 강제 적용되며 위치만 이동할 수 있습니다.",
       "success"
     );
   }
@@ -1123,6 +1137,10 @@ export function createRoiController({
 
     isSizeLocked() {
       return sizeLocked;
+    },
+
+    isSessionSizeForced() {
+      return sessionSizeForced;
     },
 
     getImage() {

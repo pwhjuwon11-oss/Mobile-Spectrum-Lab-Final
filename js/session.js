@@ -10,7 +10,7 @@ const UNKNOWN_COUNTER_KEY = "msl-v2-unknown-counter";
 export function createSession({projectName, sessionName, lightSource, measurementMode, sessionType="reference", unknownNumber=null}) {
   const measurementOrder = sessionType === "reference" ? [...REFERENCE_ORDER] : ["Unknown"];
   return {
-    version: "2.2.0",
+    version: "2.2.4",
     projectName: (projectName || "2026 과학전람회").trim(),
     sessionName: (sessionName || "측정").trim(),
     lightSource: lightSource || "6500K LED",
@@ -23,6 +23,7 @@ export function createSession({projectName, sessionName, lightSource, measuremen
     currentRepeatIndex: 0,
     measurements: [],
     roi: null,
+    roiSize: null,
     currentAnalysis: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()

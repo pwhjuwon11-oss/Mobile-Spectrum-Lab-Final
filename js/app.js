@@ -45,12 +45,35 @@ function refreshReferencePanel(){
   $("startUnknownBtn").disabled=false; const age=getReferenceAgeMs(ref), remain=Math.max(0,REFERENCE_VALID_MS-age), expired=age>REFERENCE_VALID_MS;
   const fmt=ms=>`${Math.floor(ms/3600000)}시간 ${Math.floor((ms%3600000)/60000)}분`;
   const light=ref.lightRestartedAt?' · ⚠ 광원 재가동 표시됨':'';
-  el.innerHTML=`<strong>${expired?'⚠ 유효 권장시간 초과':'✓ 기준 사용 가능'}</strong><span>측정 ${fmt(age)} 경과${expired?'':' · 남은 권장시간 '+fmt(remain)}${light}</span><small>${new Date(ref.createdAt).toLocaleString('ko-KR')} · 이전 기준 ${Math.max(0,getReferenceHistory().length-1)}개 보관</small>`;
+  const roiInfo=ref.roiSize?` · ROI ${ref.roiSize.width}×${ref.roiSize.height}px 고정`:'';
+  el.innerHTML=`<strong>${expired?'⚠ 유효 권장시간 초과':'✓ 기준 사용 가능'}</strong><span>측정 ${fmt(age)} 경과${expired?'':' · 남은 권장시간 '+fmt(remain)}${light}</span><small>${new Date(ref.createdAt).toLocaleString('ko-KR')}${roiInfo} · 이전 기준 ${Math.max(0,getReferenceHistory().length-1)}개 보관</small>`;
 }
 async function handlePhoto(e){try{state.imageElement=await camera.loadSelectedImage(e);$("continueToRoiBtn").disabled=false;}catch(err){msg($("measurementMessage"),err.message,"error")}}
 function openMeasurement(){camera.reset();state.imageElement=null;state.analysisResult=null;const m=getCurrentMeasurement(state.session);$("measurementTitle").textContent=`${m.displayName} 측정`;$("measurementInstruction").textContent=m.instruction;$("measurementStep").textContent=`${m.stepNumber} / ${m.totalSteps}`;$("measurementRepeat").textContent=`${m.repeatNumber} / 3회`;$("photoControls").classList.toggle("hidden",state.session.measurementMode!=="photo");$("videoControls").classList.toggle("hidden",state.session.measurementMode==="photo");$("continueToRoiBtn").disabled=true;showScreen("measurement");}
-function openRoi(){if(!state.imageElement)return;roiController.setImage(state.imageElement);roiController.reset();showScreen("roi");roiController.draw();}
-function analyze(){try{state.analysisResult=extractSpectrumFromImage(state.imageElement,roiController.getRoi(),6);openAnalysis();}catch(e){msg($("roiMessage"),e.message,"error")}}
+function openRoi(){
+  if(!state.imageElement)return;
+  roiController.setImage(state.imageElement);
+  let fixedSize=null;
+  if(state.session?.sessionType==="reference" && state.session.roiSize){
+    fixedSize=state.session.roiSize;
+  }else if(state.session?.sessionType==="unknown"){
+    fixedSize=getLatestReference()?.roiSize || null;
+  }
+  roiController.reset({fixedSize});
+  showScreen("roi");
+  roiController.draw();
+}
+function analyze(){
+  try{
+    const roi=roiController.getRoi();
+    if(state.session?.sessionType==="reference" && !state.session.roiSize){
+      state.session.roiSize={width:roi.width,height:roi.height};
+      saveSession(state.session);
+    }
+    state.analysisResult=extractSpectrumFromImage(state.imageElement,roi,6);
+    openAnalysis();
+  }catch(e){msg($("roiMessage"),e.message,"error")}
+}
 function openAnalysis(){const r=state.analysisResult, s=r.summary;$("analysisDataLength").textContent=s.dataLength;$("analysisRoiX").textContent=r.roi.x;$("analysisRoiY").textContent=r.roi.y;$("analysisRoiWidth").textContent=r.roi.width;$("analysisRoiHeight").textContent=r.roi.height;$("analysisPeakPixel").textContent=s.peakPixel;$("analysisPeakIntensity").textContent=Number(s.peakIntensity).toFixed(3);$("analysisMinimumPixel").textContent=s.minimumPixel;$("analysisIntensityRange").textContent=Number(s.intensityRange).toFixed(3);$("classificationCard").classList.add("hidden");$("newMeasurementBtn").textContent="측정 저장 후 다음";showScreen("analysis");drawRgbSpectrum($("rgbSpectrumCanvas"),r.spectrum);drawGraySpectrum($("graySpectrumCanvas"),r.spectrum);}
 function saveAndNext(){
   if(!state.analysisResult)return; addMeasurement(state.session,state.analysisResult); const completed=advanceMeasurement(state.session); saveSession(state.session);
@@ -62,7 +85,7 @@ function saveAndNext(){
 }
 function avgArrays(records,key){const arrs=records.map(r=>r.spectrum[key]);const n=Math.min(...arrs.map(a=>a.length));return Array.from({length:n},(_,i)=>arrs.reduce((sum,a)=>sum+Number(a[i]),0)/arrs.length);}
 function relativeAtt(sample,blank){const n=Math.min(sample.length,blank.length);return Array.from({length:n},(_,i)=>{const b=blank[i];return Math.abs(b)<1e-9?0:1-sample[i]/b;});}
-function buildReference(session){const groups={};for(const name of ["Blank","PP","PET","PS","PA","PC"])groups[name]=session.measurements.filter(r=>r.sampleType===name);const blank=avgArrays(groups.Blank,"grayMean"), spectra={};for(const p of ["PP","PET","PS","PA","PC"])spectra[p]=relativeAtt(avgArrays(groups[p],"grayMean"),blank);return {id:`REF-${Date.now()}`,createdAt:new Date().toISOString(),projectName:session.projectName,sessionName:session.sessionName,lightSource:session.lightSource,measurementMode:session.measurementMode,blank,spectra,repeatCount:3,lightRestartedAt:null};}
+function buildReference(session){const groups={};for(const name of ["Blank","PP","PET","PS","PA","PC"])groups[name]=session.measurements.filter(r=>r.sampleType===name);const blank=avgArrays(groups.Blank,"grayMean"), spectra={};for(const p of ["PP","PET","PS","PA","PC"])spectra[p]=relativeAtt(avgArrays(groups[p],"grayMean"),blank);return {id:`REF-${Date.now()}`,createdAt:new Date().toISOString(),projectName:session.projectName,sessionName:session.sessionName,lightSource:session.lightSource,measurementMode:session.measurementMode,blank,spectra,roiSize:session.roiSize?{...session.roiSize}:null,repeatCount:3,lightRestartedAt:null};}
 function euclidean(a,b){const n=Math.min(a.length,b.length);let ss=0;for(let i=0;i<n;i++){const d=a[i]-b[i];ss+=d*d;}return Math.sqrt(ss/n);}
 function classifyUnknown(session,ref){const blank=ref.blank, unk=relativeAtt(avgArrays(session.measurements,"grayMean"),blank);const ranks=Object.entries(ref.spectra).map(([material,s])=>({material,distance:euclidean(unk,s)})).sort((a,b)=>a.distance-b.distance);const max=Math.max(...ranks.map(x=>x.distance)), min=Math.min(...ranks.map(x=>x.distance));ranks.forEach((x,i)=>{x.rank=i+1;x.bar=max===min?100:Math.round(28+72*(max-x.distance)/(max-min));});return {sample:`UNKNOWN-${String(session.unknownNumber).padStart(3,"0")}`,predicted:ranks[0].material,ranks};}
 function renderClassification(c){$("classificationCard").classList.remove("hidden");$("predictionMaterial").textContent=c.predicted;$("predictionSample").textContent=c.sample;$("similarityRanking").innerHTML=c.ranks.map(x=>`<div class="rank-row ${x.rank===1?'winner':''}"><span class="rank-badge">${x.rank}</span><strong>${x.material}</strong><div class="rank-track"><span style="width:${x.bar}%"></span></div><small>d=${x.distance.toFixed(4)}</small></div>`).join("");$("classificationNote").textContent="막대는 Euclidean distance의 상대적 순위를 한눈에 보기 위한 표시입니다. 실제 판정은 distance가 가장 작은 재질을 선택합니다.";}
