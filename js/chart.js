@@ -1,12 +1,12 @@
 "use strict";
 
 /**
- * Canvas 크기를 화면과 기기 해상도에 맞춥니다.
+ * Canvas 크기를 현재 화면 폭과
+ * 기기 해상도(DPR)에 맞춥니다.
  */
 function prepareCanvas(
   canvas,
-  minimumWidth = 620,
-  height = 340
+  height = 250
 ) {
   if (!canvas) {
     throw new Error(
@@ -15,13 +15,18 @@ function prepareCanvas(
   }
 
   const containerWidth =
-    canvas.parentElement
-      ?.clientWidth || minimumWidth;
+    canvas.parentElement?.clientWidth ||
+    canvas.clientWidth ||
+    320;
 
+  /*
+   * 기존처럼 최소 620px을 강제하지 않고
+   * 실제 부모 요소의 폭을 그대로 사용합니다.
+   */
   const displayWidth =
     Math.max(
-      minimumWidth,
-      containerWidth
+      1,
+      Math.floor(containerWidth)
     );
 
   const devicePixelRatio =
@@ -30,6 +35,10 @@ function prepareCanvas(
       window.devicePixelRatio || 1
     );
 
+  /*
+   * 실제 Canvas 내부 픽셀은 DPR만큼 크게 만들어
+   * 고해상도로 렌더링합니다.
+   */
   canvas.width =
     Math.round(
       displayWidth *
@@ -42,8 +51,15 @@ function prepareCanvas(
       devicePixelRatio
     );
 
+  /*
+   * 화면에 표시되는 크기는
+   * 스마트폰 화면 폭에 맞춥니다.
+   */
   canvas.style.width =
-    `${displayWidth}px`;
+    "100%";
+
+  canvas.style.maxWidth =
+    "100%";
 
   canvas.style.height =
     `${height}px`;
@@ -63,13 +79,12 @@ function prepareCanvas(
   return {
     context,
     displayWidth,
-    displayHeight:
-      height
+    displayHeight: height
   };
 }
 
 /**
- * RGB 그래프를 그립니다.
+ * RGB 그래프
  */
 export function drawRgbSpectrum(
   canvas,
@@ -80,31 +95,25 @@ export function drawRgbSpectrum(
     [
       {
         name: "Red",
-        values:
-          spectrum.redRaw,
-        strokeStyle:
-          "#dc2626"
+        values: spectrum.redRaw,
+        strokeStyle: "#dc2626"
       },
       {
         name: "Green",
-        values:
-          spectrum.greenRaw,
-        strokeStyle:
-          "#16a34a"
+        values: spectrum.greenRaw,
+        strokeStyle: "#16a34a"
       },
       {
         name: "Blue",
-        values:
-          spectrum.blueRaw,
-        strokeStyle:
-          "#2563eb"
+        values: spectrum.blueRaw,
+        strokeStyle: "#2563eb"
       }
     ]
   );
 }
 
 /**
- * Gray 그래프를 그립니다.
+ * Gray 그래프
  */
 export function drawGraySpectrum(
   canvas,
@@ -114,16 +123,14 @@ export function drawGraySpectrum(
     canvas,
     [
       {
-        name:
-          "Gray BT.601",
+        name: "Gray BT.601",
         values:
           spectrum.grayBt601,
         strokeStyle:
           "#111827"
       },
       {
-        name:
-          "Gray Mean",
+        name: "Gray Mean",
         values:
           spectrum.grayMean,
         strokeStyle:
@@ -134,7 +141,7 @@ export function drawGraySpectrum(
 }
 
 /**
- * 공통 선 그래프 함수
+ * 공통 스펙트럼 선 그래프
  */
 export function drawSpectrumChart(
   canvas,
@@ -149,11 +156,17 @@ export function drawSpectrumChart(
     );
   }
 
+  /*
+   * RGB와 Gray 모두 동일한 높이
+   */
   const {
     context,
     displayWidth,
     displayHeight
-  } = prepareCanvas(canvas);
+  } = prepareCanvas(
+    canvas,
+    250
+  );
 
   context.clearRect(
     0,
@@ -172,28 +185,65 @@ export function drawSpectrumChart(
     displayHeight
   );
 
+  /*
+   * 스마트폰에서도 축 숫자가 잘리지 않도록
+   * 좌우 여백을 확보합니다.
+   */
   const padding = {
-    left: 50,
-    right: 18,
+    left: 42,
+    right: 16,
     top: 34,
-    bottom: 42
+    bottom: 45
   };
 
   const graphWidth =
-    displayWidth -
-    padding.left -
-    padding.right;
+    Math.max(
+      1,
+      displayWidth -
+        padding.left -
+        padding.right
+    );
 
   const graphHeight =
-    displayHeight -
-    padding.top -
-    padding.bottom;
+    Math.max(
+      1,
+      displayHeight -
+        padding.top -
+        padding.bottom
+    );
+
+  /*
+   * 실제 데이터 길이 확인
+   */
+  const dataLength =
+    Math.max(
+      ...seriesList.map(
+        series =>
+          Array.isArray(series.values)
+            ? series.values.length
+            : 0
+      )
+    );
+
+  const maxPixel =
+    Math.max(
+      1,
+      dataLength - 1
+    );
 
   drawGrid(
     context,
     padding,
     graphWidth,
     graphHeight
+  );
+
+  drawXAxis(
+    context,
+    padding,
+    graphWidth,
+    graphHeight,
+    maxPixel
   );
 
   seriesList.forEach(
@@ -212,21 +262,32 @@ export function drawSpectrumChart(
     }
   );
 
+  /*
+   * X축 제목
+   */
   context.fillStyle =
     "#64748b";
 
   context.font =
-    "12px sans-serif";
+    "11px sans-serif";
+
+  context.textAlign =
+    "center";
 
   context.fillText(
     "ROI pixel",
     padding.left +
-      graphWidth / 2 -
-      25,
-    displayHeight - 11
+      graphWidth / 2,
+    displayHeight - 8
   );
+
+  context.textAlign =
+    "start";
 }
 
+/**
+ * Y축 및 가로 격자
+ */
 function drawGrid(
   context,
   padding,
@@ -240,8 +301,12 @@ function drawGrid(
     "#64748b";
 
   context.lineWidth = 1;
+
   context.font =
-    "11px sans-serif";
+    "10px sans-serif";
+
+  context.textAlign =
+    "right";
 
   for (
     let lineIndex = 0;
@@ -254,7 +319,7 @@ function drawGrid(
     const y =
       padding.top +
       graphHeight *
-      ratio;
+        ratio;
 
     context.beginPath();
 
@@ -279,12 +344,130 @@ function drawGrid(
 
     context.fillText(
       String(intensity),
-      8,
+      padding.left - 7,
       y + 4
     );
   }
+
+  context.textAlign =
+    "start";
 }
 
+/**
+ * X축 눈금
+ * 0 / 80 / 160 / 240 / 319
+ */
+function drawXAxis(
+  context,
+  padding,
+  graphWidth,
+  graphHeight,
+  maxPixel
+) {
+  const requestedTicks =
+    [0, 80, 160, 240, 319];
+
+  /*
+   * 정상적인 320개 데이터에서는
+   * 그대로 0,80,160,240,319 표시.
+   * 데이터가 짧은 경우 범위를 벗어난
+   * 눈금은 자동 제외합니다.
+   */
+  const ticks =
+    requestedTicks.filter(
+      tick =>
+        tick <= maxPixel
+    );
+
+  /*
+   * 마지막 데이터 번호도
+   * 반드시 표시되도록 처리
+   */
+  if (
+    !ticks.includes(maxPixel) &&
+    maxPixel !== 319
+  ) {
+    ticks.push(maxPixel);
+  }
+
+  context.font =
+    "10px sans-serif";
+
+  context.fillStyle =
+    "#64748b";
+
+  context.strokeStyle =
+    "#cbd5e1";
+
+  context.lineWidth = 1;
+
+  ticks.forEach(
+    tick => {
+      const ratio =
+        tick /
+        Math.max(
+          1,
+          maxPixel
+        );
+
+      const x =
+        padding.left +
+        ratio *
+          graphWidth;
+
+      const axisY =
+        padding.top +
+        graphHeight;
+
+      /*
+       * 짧은 세로 눈금선
+       */
+      context.beginPath();
+
+      context.moveTo(
+        x,
+        axisY
+      );
+
+      context.lineTo(
+        x,
+        axisY + 5
+      );
+
+      context.stroke();
+
+      /*
+       * 양 끝 숫자가 잘리지 않도록
+       * 정렬을 다르게 처리
+       */
+      if (tick === 0) {
+        context.textAlign =
+          "left";
+      } else if (
+        tick === maxPixel
+      ) {
+        context.textAlign =
+          "right";
+      } else {
+        context.textAlign =
+          "center";
+      }
+
+      context.fillText(
+        String(tick),
+        x,
+        axisY + 17
+      );
+    }
+  );
+
+  context.textAlign =
+    "start";
+}
+
+/**
+ * 스펙트럼 선
+ */
 function drawSeries(
   context,
   series,
@@ -309,7 +492,13 @@ function drawSeries(
     series.strokeStyle;
 
   context.lineWidth =
-    1.7;
+    1.5;
+
+  context.lineJoin =
+    "round";
+
+  context.lineCap =
+    "round";
 
   values.forEach(
     (
@@ -325,7 +514,7 @@ function drawSeries(
             values.length - 1
           )
         ) *
-        graphWidth;
+          graphWidth;
 
       const normalizedValue =
         Math.min(
@@ -340,11 +529,14 @@ function drawSeries(
         padding.top +
         (
           1 -
-          normalizedValue / 255
+          normalizedValue /
+            255
         ) *
-        graphHeight;
+          graphHeight;
 
-      if (pointIndex === 0) {
+      if (
+        pointIndex === 0
+      ) {
         context.moveTo(
           x,
           y
@@ -368,15 +560,22 @@ function drawSeries(
   );
 }
 
+/**
+ * 범례
+ */
 function drawLegend(
   context,
   series,
   seriesIndex,
   padding
 ) {
+  /*
+   * 스마트폰에서도 RGB 3개 범례가
+   * 한 줄에 들어갈 수 있도록 간격 축소
+   */
   const startX =
     padding.left +
-    seriesIndex * 140;
+    seriesIndex * 82;
 
   context.fillStyle =
     series.strokeStyle;
@@ -384,7 +583,7 @@ function drawLegend(
   context.fillRect(
     startX,
     14,
-    14,
+    12,
     3
   );
 
@@ -392,11 +591,11 @@ function drawLegend(
     "#334155";
 
   context.font =
-    "12px sans-serif";
+    "10px sans-serif";
 
   context.fillText(
     series.name,
-    startX + 19,
+    startX + 16,
     19
   );
 }
