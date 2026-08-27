@@ -972,7 +972,7 @@ button {
 .chart-container {
   width: 100%;
 
-  overflow-x: auto;
+  overflow-x: hidden;
 
   border: 1px solid #e2e8f0;
   border-radius: 15px;
@@ -984,8 +984,9 @@ button {
   display: block;
 
   width: 100%;
-  min-width: 620px;
-  height: 340px;
+  max-width: 100%;
+  min-width: 0;
+  height: 250;
 }
 
 .formula-information {
@@ -1079,9 +1080,11 @@ button {
   }
 
   .spectrum-chart {
-    min-width: 560px;
-    height: 310px;
-  }
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 250px;
+}
 }
 /* v2.2.0 기준 세션/분류 UI */
 .reference-card{border:1px solid rgba(15,23,42,.08)}
