@@ -28,9 +28,9 @@ function bind(){
   $("recordThreeSecondsBtn").onclick=async()=>{try{state.imageElement=await camera.captureThreeSeconds();$("continueToRoiBtn").disabled=false;}catch(e){msg($("measurementMessage"),e.message,"error")}};
   $("continueToRoiBtn").onclick=openRoi; $("cancelSessionBtn").onclick=returnSetup; $("returnToMeasurementBtn").onclick=openMeasurement;
   $("lockRoiSizeBtn").onclick=requestRoiConfirmation; $("confirmRoiBtn").onclick=analyze;
-  $("returnToRoiBtn").onclick=()=>{showScreen("roi");roiController.draw();updateRoiUiForSession();};
+  $("returnToRoiBtn").onclick=()=>{showScreen("roi");redrawRoiForCurrentState();updateRoiUiForSession();};
   $("newMeasurementBtn").onclick=saveAndNext; $("downloadRawCsvBtn").onclick=downloadCsv;
-  window.addEventListener("resize",()=>{if(!screens.roi.classList.contains("hidden"))roiController.draw();});
+  window.addEventListener("resize",()=>{if(!screens.roi.classList.contains("hidden"))redrawRoiForCurrentState();});
 }
 function selectMode(mode){state.selectedMode=mode;const p=mode==="photo";$("photoModeBtn").classList.toggle("selected",p);$("videoModeBtn").classList.toggle("selected",!p);$("selectedModeText").textContent=p?"사진 모드":"3초 영상 모드";}
 function startSession(type){
@@ -65,7 +65,7 @@ function openRoi(){
     roiController.reset();
   }
   showScreen("roi");
-  roiController.draw();
+  redrawRoiForCurrentState();
   updateRoiUiForSession();
 }
 function requestRoiConfirmation(){
@@ -83,7 +83,8 @@ function confirmRoiForSession(){
     state.session.roiLocked=true;
     saveSession(state.session);
     updateRoiUiForSession();
-    msg($("roiMessage"),"ROI 확정됨 · 현재 세션이 종료될 때까지 위치와 크기를 변경할 수 없습니다.","success");
+    renderLockedRoiView();
+    msg($("roiMessage"),"ROI 확정됨 · 세션 종료까지 고정됩니다.","success");
   }catch(e){msg($("roiMessage"),e.message,"error")}
 }
 function updateRoiUiForSession(){
@@ -92,12 +93,14 @@ function updateRoiUiForSession(){
   const analyzeBtn=$("confirmRoiBtn");
   const returnBtn=$("returnToRoiBtn");
   const help=document.querySelector(".roi-help");
+  const nudgePanel=document.querySelector(".roi-nudge-panel");
   if(locked){
     lockBtn.disabled=true;
     lockBtn.textContent="ROI 확정됨";
     analyzeBtn.disabled=false;
     if(returnBtn)returnBtn.textContent="확정 ROI 확인하기";
-    if(help)help.textContent="ROI가 현재 세션에 고정되었습니다. 세션 종료 전까지 크기와 위치를 변경할 수 없으며, 같은 ROI가 모든 측정에 적용됩니다.";
+    if(help)help.textContent="ROI 확정됨 · 세션 종료까지 고정됩니다. 같은 위치와 크기의 ROI가 현재 세션의 모든 측정에 적용됩니다.";
+    if(nudgePanel)nudgePanel.classList.add("hidden");
     $("roiWidthInput").disabled=true;
     $("roiHeightInput").disabled=true;
   }else{
@@ -106,7 +109,50 @@ function updateRoiUiForSession(){
     analyzeBtn.disabled=true;
     if(returnBtn)returnBtn.textContent="ROI 위치 다시 조정하기";
     if(help)help.textContent="숫자 입력과 노란색 조절점으로 크기를 바꾸고, ROI 영역을 드래그해 위치를 조정한 뒤 ROI를 확정하세요. 확정 후에는 세션 종료까지 변경할 수 없습니다.";
+    if(nudgePanel)nudgePanel.classList.remove("hidden");
   }
+}
+function redrawRoiForCurrentState(){
+  if(state.session?.roiLocked){
+    renderLockedRoiView();
+  }else{
+    roiController.draw();
+  }
+}
+function renderLockedRoiView(){
+  const canvas=$("roiCanvas");
+  const image=state.imageElement;
+  const roi=state.session?.roi;
+  if(!canvas || !image || !roi)return;
+  const context=canvas.getContext("2d");
+  if(!context)return;
+  const sourceWidth=image.naturalWidth || image.width;
+  const sourceHeight=image.naturalHeight || image.height;
+  if(!sourceWidth || !sourceHeight)return;
+  const parentWidth=canvas.parentElement?.clientWidth || 320;
+  const availableWidth=Math.min(860,Math.max(280,parentWidth-4));
+  const scale=Math.min(1,availableWidth/sourceWidth);
+  const displayWidth=Math.max(1,Math.round(sourceWidth*scale));
+  const displayHeight=Math.max(1,Math.round(sourceHeight*scale));
+  if(canvas.width!==displayWidth)canvas.width=displayWidth;
+  if(canvas.height!==displayHeight)canvas.height=displayHeight;
+  context.clearRect(0,0,displayWidth,displayHeight);
+  context.drawImage(image,0,0,displayWidth,displayHeight);
+  const x=roi.x*scale, y=roi.y*scale, width=roi.width*scale, height=roi.height*scale;
+  context.save();
+  context.fillStyle="rgba(0, 0, 0, 0.34)";
+  context.fillRect(0,0,displayWidth,y);
+  context.fillRect(0,y+height,displayWidth,displayHeight-y-height);
+  context.fillRect(0,y,x,height);
+  context.fillRect(x+width,y,displayWidth-x-width,height);
+  context.strokeStyle="#facc15";
+  context.lineWidth=Math.max(2,3*scale);
+  context.setLineDash([8,5]);
+  context.strokeRect(x,y,width,height);
+  context.setLineDash([]);
+  context.fillStyle="rgba(250, 204, 21, 0.12)";
+  context.fillRect(x,y,width,height);
+  context.restore();
 }
 function installRoiLockGuards(){
   const canvas=$("roiCanvas");
@@ -127,6 +173,7 @@ function resetRoiInputsToInitial(){
   $("roiHeightInput").disabled=false;
   $("roiWidthInput").value=String(initialRoi.width);
   $("roiHeightInput").value=String(initialRoi.height);
+  document.querySelector(".roi-nudge-panel")?.classList.remove("hidden");
 }
 function ensureRoiConfirmModal(){
   if($("roiConfirmModal"))return;
