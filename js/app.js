@@ -9,11 +9,15 @@ import { downloadSpectrumCsv } from "./export.js";
 const $ = id => document.getElementById(id);
 const screens={setup:$("setupScreen"),measurement:$("measurementScreen"),roi:$("roiScreen"),analysis:$("analysisScreen")};
 const state={selectedMode:"photo",session:null,imageElement:null,analysisResult:null,lastClassification:null};
+const initialRoi={
+  width:Number($("roiWidthInput")?.defaultValue || 320),
+  height:Number($("roiHeightInput")?.defaultValue || 40)
+};
 const camera=createCameraController({cameraPreview:$("cameraPreview"),spectrumImage:$("spectrumImage"),previewPlaceholder:$("previewPlaceholder"),cameraPhotoInput:$("cameraPhotoInput"),galleryPhotoInput:$("galleryPhotoInput"),messageElement:$("measurementMessage")});
 const roiController=createRoiController({canvas:$("roiCanvas"),widthInput:$("roiWidthInput"),heightInput:$("roiHeightInput"),lockButton:$("lockRoiSizeBtn"),confirmButton:$("confirmRoiBtn"),messageElement:$("roiMessage"),xValue:$("roiXValue"),yValue:$("roiYValue"),widthValue:$("roiWidthValue"),heightValue:$("roiHeightValue"),sizeSummary:$("roiSizeSummary")});
 
 init();
-function init(){bind();selectMode("photo");refreshReferencePanel();showScreen("setup");}
+function init(){bind();installRoiLockGuards();ensureRoiConfirmModal();selectMode("photo");refreshReferencePanel();showScreen("setup");}
 function bind(){
   $("photoModeBtn").onclick=()=>selectMode("photo"); $("videoModeBtn").onclick=()=>selectMode("video");
   $("startSessionBtn").onclick=()=>startSession("reference"); $("startUnknownBtn").onclick=()=>startSession("unknown");
@@ -23,8 +27,8 @@ function bind(){
   $("startVideoBtn").onclick=async()=>{try{await camera.startPreview();$("recordThreeSecondsBtn").disabled=false;}catch(e){msg($("measurementMessage"),e.message,"error")}};
   $("recordThreeSecondsBtn").onclick=async()=>{try{state.imageElement=await camera.captureThreeSeconds();$("continueToRoiBtn").disabled=false;}catch(e){msg($("measurementMessage"),e.message,"error")}};
   $("continueToRoiBtn").onclick=openRoi; $("cancelSessionBtn").onclick=returnSetup; $("returnToMeasurementBtn").onclick=openMeasurement;
-  $("lockRoiSizeBtn").onclick=()=>roiController.lockSize(); $("confirmRoiBtn").onclick=analyze;
-  $("returnToRoiBtn").onclick=()=>{showScreen("roi");roiController.draw();};
+  $("lockRoiSizeBtn").onclick=requestRoiConfirmation; $("confirmRoiBtn").onclick=analyze;
+  $("returnToRoiBtn").onclick=()=>{showScreen("roi");roiController.draw();updateRoiUiForSession();};
   $("newMeasurementBtn").onclick=saveAndNext; $("downloadRawCsvBtn").onclick=downloadCsv;
   window.addEventListener("resize",()=>{if(!screens.roi.classList.contains("hidden"))roiController.draw();});
 }
@@ -36,7 +40,11 @@ function startSession(type){
     const warnings=[]; if(isReferenceExpired(ref)) warnings.push("기준 측정 후 4시간이 지났습니다."); if(ref.lightRestartedAt) warnings.push("광원이 재가동된 것으로 표시되어 있습니다.");
     if(warnings.length && !confirm(`${warnings.join("\n")}\n정확도를 위해 기준 재측정을 권장합니다. 기존 기준으로 계속할까요?`)) return;
   }
+  resetRoiInputsToInitial();
   state.session=createSession({projectName:$("projectName").value,sessionName:$("sessionName").value,lightSource:$("lightSource").value,measurementMode:state.selectedMode,sessionType:type,unknownNumber:type==="unknown"?getNextUnknownNumber():null});
+  state.session.roiLocked=false;
+  state.session.roi=null;
+  state.session.roiSize=null;
   saveSession(state.session);openMeasurement();
 }
 function refreshReferencePanel(){
@@ -53,23 +61,96 @@ function openMeasurement(){camera.reset();state.imageElement=null;state.analysis
 function openRoi(){
   if(!state.imageElement)return;
   roiController.setImage(state.imageElement);
-  let fixedSize=null;
-  if(state.session?.sessionType==="reference" && state.session.roiSize){
-    fixedSize=state.session.roiSize;
-  }else if(state.session?.sessionType==="unknown"){
-    fixedSize=getLatestReference()?.roiSize || null;
+  if(!state.session?.roiLocked){
+    roiController.reset();
   }
-  roiController.reset({fixedSize});
   showScreen("roi");
   roiController.draw();
+  updateRoiUiForSession();
 }
-function analyze(){
+function requestRoiConfirmation(){
+  if(!state.session || state.session.roiLocked)return;
+  openRoiConfirmModal();
+}
+function confirmRoiForSession(){
+  if(!state.session || state.session.roiLocked)return;
+  roiController.lockSize();
+  if(!roiController.isSizeLocked())return;
   try{
     const roi=roiController.getRoi();
-    if(state.session?.sessionType==="reference" && !state.session.roiSize){
-      state.session.roiSize={width:roi.width,height:roi.height};
-      saveSession(state.session);
-    }
+    state.session.roi={...roi};
+    state.session.roiSize={width:roi.width,height:roi.height};
+    state.session.roiLocked=true;
+    saveSession(state.session);
+    updateRoiUiForSession();
+    msg($("roiMessage"),"ROI 확정됨 · 현재 세션이 종료될 때까지 위치와 크기를 변경할 수 없습니다.","success");
+  }catch(e){msg($("roiMessage"),e.message,"error")}
+}
+function updateRoiUiForSession(){
+  const locked=Boolean(state.session?.roiLocked);
+  const lockBtn=$("lockRoiSizeBtn");
+  const analyzeBtn=$("confirmRoiBtn");
+  const returnBtn=$("returnToRoiBtn");
+  const help=document.querySelector(".roi-help");
+  if(locked){
+    lockBtn.disabled=true;
+    lockBtn.textContent="ROI 확정됨";
+    analyzeBtn.disabled=false;
+    if(returnBtn)returnBtn.textContent="확정 ROI 확인하기";
+    if(help)help.textContent="ROI가 현재 세션에 고정되었습니다. 세션 종료 전까지 크기와 위치를 변경할 수 없으며, 같은 ROI가 모든 측정에 적용됩니다.";
+    $("roiWidthInput").disabled=true;
+    $("roiHeightInput").disabled=true;
+  }else{
+    lockBtn.disabled=false;
+    lockBtn.textContent="ROI 확정";
+    analyzeBtn.disabled=true;
+    if(returnBtn)returnBtn.textContent="ROI 위치 다시 조정하기";
+    if(help)help.textContent="숫자 입력과 노란색 조절점으로 크기를 바꾸고, ROI 영역을 드래그해 위치를 조정한 뒤 ROI를 확정하세요. 확정 후에는 세션 종료까지 변경할 수 없습니다.";
+  }
+}
+function installRoiLockGuards(){
+  const canvas=$("roiCanvas");
+  const block=event=>{
+    if(!state.session?.roiLocked)return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  canvas.addEventListener("pointerdown",block,true);
+  canvas.addEventListener("keydown",block,true);
+  document.addEventListener("click",event=>{
+    if(!state.session?.roiLocked)return;
+    if(event.target.closest?.("[data-roi-nudge]"))block(event);
+  },true);
+}
+function resetRoiInputsToInitial(){
+  $("roiWidthInput").disabled=false;
+  $("roiHeightInput").disabled=false;
+  $("roiWidthInput").value=String(initialRoi.width);
+  $("roiHeightInput").value=String(initialRoi.height);
+}
+function ensureRoiConfirmModal(){
+  if($("roiConfirmModal"))return;
+  const modal=document.createElement("div");
+  modal.id="roiConfirmModal";
+  modal.setAttribute("role","dialog");
+  modal.setAttribute("aria-modal","true");
+  modal.setAttribute("aria-labelledby","roiConfirmModalTitle");
+  modal.hidden=true;
+  modal.innerHTML=`<div class="roi-modal-backdrop"></div><div class="roi-modal-panel"><h3 id="roiConfirmModalTitle">ROI를 확정하시겠습니까?</h3><p>확정 후에는 현재 세션이 종료될 때까지 ROI의 위치와 크기를 변경할 수 없습니다.</p><div class="roi-modal-actions"><button id="cancelRoiConfirmBtn" type="button">취소</button><button id="acceptRoiConfirmBtn" type="button">확정</button></div></div>`;
+  const style=document.createElement("style");
+  style.textContent=`#roiConfirmModal[hidden]{display:none!important}#roiConfirmModal{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px}.roi-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.58)}.roi-modal-panel{position:relative;width:min(100%,420px);padding:24px;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.28)}.roi-modal-panel h3{margin:0 0 10px;font-size:20px}.roi-modal-panel p{margin:0;color:#64748b;line-height:1.6}.roi-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:22px}.roi-modal-actions button{min-height:48px;border-radius:12px;font-weight:800;cursor:pointer}.roi-modal-actions button:first-child{border:1px solid #cbd5e1;background:#fff;color:#334155}.roi-modal-actions button:last-child{border:0;background:#2563eb;color:#fff}`;
+  document.head.appendChild(style);
+  document.body.appendChild(modal);
+  $("cancelRoiConfirmBtn").onclick=closeRoiConfirmModal;
+  $("acceptRoiConfirmBtn").onclick=()=>{closeRoiConfirmModal();confirmRoiForSession();};
+  modal.querySelector(".roi-modal-backdrop").onclick=closeRoiConfirmModal;
+}
+function openRoiConfirmModal(){const modal=$("roiConfirmModal");modal.hidden=false;$("acceptRoiConfirmBtn")?.focus();}
+function closeRoiConfirmModal(){const modal=$("roiConfirmModal");if(modal)modal.hidden=true;}
+function analyze(){
+  try{
+    if(!state.session?.roiLocked){msg($("roiMessage"),"ROI를 먼저 확정하세요.","error");return;}
+    const roi=state.session.roi || roiController.getRoi();
     state.analysisResult=extractSpectrumFromImage(state.imageElement,roi,6);
     openAnalysis();
   }catch(e){msg($("roiMessage"),e.message,"error")}
@@ -85,11 +166,11 @@ function saveAndNext(){
 }
 function avgArrays(records,key){const arrs=records.map(r=>r.spectrum[key]);const n=Math.min(...arrs.map(a=>a.length));return Array.from({length:n},(_,i)=>arrs.reduce((sum,a)=>sum+Number(a[i]),0)/arrs.length);}
 function relativeAtt(sample,blank){const n=Math.min(sample.length,blank.length);return Array.from({length:n},(_,i)=>{const b=blank[i];return Math.abs(b)<1e-9?0:1-sample[i]/b;});}
-function buildReference(session){const groups={};for(const name of ["Blank","PP","PET","PS","PA","PC"])groups[name]=session.measurements.filter(r=>r.sampleType===name);const blank=avgArrays(groups.Blank,"grayMean"), spectra={};for(const p of ["PP","PET","PS","PA","PC"])spectra[p]=relativeAtt(avgArrays(groups[p],"grayMean"),blank);return {id:`REF-${Date.now()}`,createdAt:new Date().toISOString(),projectName:session.projectName,sessionName:session.sessionName,lightSource:session.lightSource,measurementMode:session.measurementMode,blank,spectra,roiSize:session.roiSize?{...session.roiSize}:null,repeatCount:3,lightRestartedAt:null};}
+function buildReference(session){const groups={};for(const name of ["Blank","PP","PET","PS","PA","PC"])groups[name]=session.measurements.filter(r=>r.sampleType===name);const blank=avgArrays(groups.Blank,"grayMean"), spectra={};for(const p of ["PP","PET","PS","PA","PC"])spectra[p]=relativeAtt(avgArrays(groups[p],"grayMean"),blank);return {id:`REF-${Date.now()}`,createdAt:new Date().toISOString(),projectName:session.projectName,sessionName:session.sessionName,lightSource:session.lightSource,measurementMode:session.measurementMode,blank,spectra,roi:session.roi?{...session.roi}:null,roiSize:session.roiSize?{...session.roiSize}:null,repeatCount:3,lightRestartedAt:null};}
 function euclidean(a,b){const n=Math.min(a.length,b.length);let ss=0;for(let i=0;i<n;i++){const d=a[i]-b[i];ss+=d*d;}return Math.sqrt(ss/n);}
 function classifyUnknown(session,ref){const blank=ref.blank, unk=relativeAtt(avgArrays(session.measurements,"grayMean"),blank);const ranks=Object.entries(ref.spectra).map(([material,s])=>({material,distance:euclidean(unk,s)})).sort((a,b)=>a.distance-b.distance);const max=Math.max(...ranks.map(x=>x.distance)), min=Math.min(...ranks.map(x=>x.distance));ranks.forEach((x,i)=>{x.rank=i+1;x.bar=max===min?100:Math.round(28+72*(max-x.distance)/(max-min));});return {sample:`UNKNOWN-${String(session.unknownNumber).padStart(3,"0")}`,predicted:ranks[0].material,ranks};}
 function renderClassification(c){$("classificationCard").classList.remove("hidden");$("predictionMaterial").textContent=c.predicted;$("predictionSample").textContent=c.sample;$("similarityRanking").innerHTML=c.ranks.map(x=>`<div class="rank-row ${x.rank===1?'winner':''}"><span class="rank-badge">${x.rank}</span><strong>${x.material}</strong><div class="rank-track"><span style="width:${x.bar}%"></span></div><small>d=${x.distance.toFixed(4)}</small></div>`).join("");$("classificationNote").textContent="막대는 Euclidean distance의 상대적 순위를 한눈에 보기 위한 표시입니다. 실제 판정은 distance가 가장 작은 재질을 선택합니다.";}
 function downloadCsv(){if(!state.analysisResult)return;const m=getCurrentMeasurement(state.session);downloadSpectrumCsv({analysisResult:state.analysisResult,sessionName:state.session.sessionName,sampleName:m.displayName,repeatNumber:m.repeatNumber});}
 function showScreen(name){Object.entries(screens).forEach(([n,e])=>e.classList.toggle("hidden",n!==name));window.scrollTo({top:0,behavior:"smooth"});}
-function returnSetup(){camera.reset();state.session=null;state.imageElement=null;state.analysisResult=null;refreshReferencePanel();showScreen("setup");$("newMeasurementBtn").onclick=saveAndNext;}
+function returnSetup(){camera.reset();state.session=null;state.imageElement=null;state.analysisResult=null;closeRoiConfirmModal();resetRoiInputsToInitial();refreshReferencePanel();showScreen("setup");$("newMeasurementBtn").onclick=saveAndNext;}
 function msg(el,text,type=""){el.className=`status-message${type?' '+type:''}`;el.textContent=text;}
