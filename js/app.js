@@ -9,336 +9,82 @@ import { downloadSpectrumCsv } from "./export.js";
 const $ = id => document.getElementById(id);
 const screens={setup:$("setupScreen"),measurement:$("measurementScreen"),roi:$("roiScreen"),analysis:$("analysisScreen")};
 const state={selectedMode:"photo",mountOrientation:"normal",session:null,imageElement:null,analysisResult:null,lastClassification:null};
-const initialRoi={
-  width:Number($("roiWidthInput")?.defaultValue || 320),
-  height:Number($("roiHeightInput")?.defaultValue || 40)
-};
+const initialRoi={width:Number($("roiWidthInput")?.defaultValue || 320),height:Number($("roiHeightInput")?.defaultValue || 40)};
 const camera=createCameraController({cameraPreview:$("cameraPreview"),spectrumImage:$("spectrumImage"),previewPlaceholder:$("previewPlaceholder"),cameraPhotoInput:$("cameraPhotoInput"),galleryPhotoInput:$("galleryPhotoInput"),messageElement:$("measurementMessage")});
 const roiController=createRoiController({canvas:$("roiCanvas"),widthInput:$("roiWidthInput"),heightInput:$("roiHeightInput"),lockButton:$("lockRoiSizeBtn"),confirmButton:$("confirmRoiBtn"),messageElement:$("roiMessage"),xValue:$("roiXValue"),yValue:$("roiYValue"),widthValue:$("roiWidthValue"),heightValue:$("roiHeightValue"),sizeSummary:$("roiSizeSummary")});
 const mirroredPointerEvents=new WeakSet();
 
 init();
-function init(){
-  ensureMountOrientationControls();
-  ensureInternalPhotoCaptureButton();
-  ensureMountStyles();
-  bind();
-  installRoiLockGuards();
-  installMountedPointerMirror();
-  ensureRoiConfirmModal();
-  selectMode("photo");
-  selectMountOrientation("normal");
-  refreshReferencePanel();
-  showScreen("setup");
-}
+function init(){ensureMountOrientationControls();ensureInternalPhotoCaptureButton();ensureMountStyles();bind();installRoiLockGuards();installMountedPointerMirror();ensureRoiConfirmModal();selectMode("photo");selectMountOrientation("normal");refreshReferencePanel();showScreen("setup");}
 function bind(){
-  $("photoModeBtn").onclick=()=>selectMode("photo"); $("videoModeBtn").onclick=()=>selectMode("video");
-  $("startSessionBtn").onclick=()=>startSession("reference"); $("startUnknownBtn").onclick=()=>startSession("unknown");
-  $("lightRestartBtn").onclick=()=>{ if(confirm("광원을 껐다 다시 켰다면 기존 기준의 재측정을 권장합니다. 상태를 표시할까요?")){markLightRestarted();refreshReferencePanel();} };
-  $("cameraPhotoBtn").onclick=startPhotoPreview; $("galleryPhotoBtn").onclick=()=>camera.openGalleryInput();
-  $("capturePhotoBtn").onclick=capturePhotoFromPreview;
-  $("cameraPhotoInput").onchange=handlePhoto; $("galleryPhotoInput").onchange=handlePhoto;
+  $("photoModeBtn").onclick=()=>selectMode("photo");$("videoModeBtn").onclick=()=>selectMode("video");
+  $("startSessionBtn").onclick=()=>startSession("reference");$("startUnknownBtn").onclick=()=>startSession("unknown");
+  $("lightRestartBtn").onclick=()=>{if(confirm("광원을 껐다 다시 켰다면 기존 기준의 재측정을 권장합니다. 상태를 표시할까요?")){markLightRestarted();refreshReferencePanel();}};
+  $("cameraPhotoBtn").onclick=startPhotoPreview;$("galleryPhotoBtn").onclick=()=>camera.openGalleryInput();$("capturePhotoBtn").onclick=capturePhotoFromPreview;
+  $("cameraPhotoInput").onchange=handlePhoto;$("galleryPhotoInput").onchange=handlePhoto;
   $("startVideoBtn").onclick=async()=>{try{await camera.startPreview();$("recordThreeSecondsBtn").disabled=false;}catch(e){msg($("measurementMessage"),e.message,"error")}};
   $("recordThreeSecondsBtn").onclick=async()=>{try{state.imageElement=await camera.captureThreeSeconds();$("continueToRoiBtn").disabled=false;}catch(e){msg($("measurementMessage"),e.message,"error")}};
-  $("continueToRoiBtn").onclick=openRoi; $("cancelSessionBtn").onclick=returnSetup; $("returnToMeasurementBtn").onclick=openMeasurement;
-  $("lockRoiSizeBtn").onclick=requestRoiConfirmation; $("confirmRoiBtn").onclick=analyze;
+  $("continueToRoiBtn").onclick=openRoi;$("cancelSessionBtn").onclick=returnSetup;$("returnToMeasurementBtn").onclick=openMeasurement;
+  $("lockRoiSizeBtn").onclick=requestRoiConfirmation;$("confirmRoiBtn").onclick=analyze;
   $("returnToRoiBtn").onclick=()=>{showScreen("roi");redrawRoiForCurrentState();updateRoiUiForSession();};
-  $("newMeasurementBtn").onclick=saveAndNext; $("downloadRawCsvBtn").onclick=downloadCsv;
+  $("newMeasurementBtn").onclick=saveAndNext;$("downloadRawCsvBtn").onclick=downloadCsv;
   window.addEventListener("resize",()=>{if(!screens.roi.classList.contains("hidden"))redrawRoiForCurrentState();});
 }
-function selectMode(mode){
-  state.selectedMode=mode;
-  const p=mode==="photo";
-  $("photoModeBtn").classList.toggle("selected",p);
-  $("videoModeBtn").classList.toggle("selected",!p);
-  $("selectedModeText").textContent=p?"사진 모드":"3초 영상 모드";
-}
+function selectMode(mode){state.selectedMode=mode;const p=mode==="photo";$("photoModeBtn").classList.toggle("selected",p);$("videoModeBtn").classList.toggle("selected",!p);$("selectedModeText").textContent=p?"사진 모드":"3초 영상 모드";}
 function ensureMountOrientationControls(){
-  if($("mountOrientationCard"))return;
-  const setup=$("setupScreen");
-  const intro=setup?.querySelector(".intro-panel");
-  if(!setup || !intro)return;
-  const card=document.createElement("section");
-  card.id="mountOrientationCard";
-  card.className="card mount-orientation-card";
+  if($("mountOrientationCard"))return;const setup=$("setupScreen"),intro=setup?.querySelector(".intro-panel");if(!setup||!intro)return;
+  const card=document.createElement("section");card.id="mountOrientationCard";card.className="card mount-orientation-card";
   card.innerHTML=`<div class="card-heading"><div class="step-number">↻</div><div><h2>스마트폰 장착 방향</h2><p>분광기에 스마트폰을 거꾸로 장착할 때는 180° 모드를 선택하세요.</p></div></div><div class="mount-orientation-grid"><button id="mountNormalBtn" class="mode-card selected" type="button"><span class="mode-icon">📱</span><span class="mode-text"><strong>일반 사용</strong><small>스마트폰을 정상 방향으로 사용할 때</small></span><span class="mode-check">선택됨</span></button><button id="mount180Btn" class="mode-card" type="button"><span class="mode-icon">↻</span><span class="mode-text"><strong>분광기 장착 · 180°</strong><small>카메라가 아래쪽을 향하도록 거꾸로 장착할 때</small></span><span class="mode-check">선택</span></button></div><p class="field-note">장착 방향은 세션 시작 전에 선택하며, 측정 중에는 같은 방향을 유지합니다.</p>`;
-  intro.insertAdjacentElement("afterend",card);
-  $("mountNormalBtn").onclick=()=>selectMountOrientation("normal");
-  $("mount180Btn").onclick=()=>selectMountOrientation("mounted180");
+  intro.insertAdjacentElement("afterend",card);$("mountNormalBtn").onclick=()=>selectMountOrientation("normal");$("mount180Btn").onclick=()=>selectMountOrientation("mounted180");
 }
-function ensureInternalPhotoCaptureButton(){
-  if($("capturePhotoBtn"))return;
-  const controls=$("photoControls");
-  if(!controls)return;
-  const button=document.createElement("button");
-  button.id="capturePhotoBtn";
-  button.type="button";
-  button.className="primary-button in-app-shutter hidden";
-  button.textContent="📷 촬영";
-  controls.appendChild(button);
-}
+function ensureInternalPhotoCaptureButton(){if($("capturePhotoBtn"))return;const controls=$("photoControls");if(!controls)return;const button=document.createElement("button");button.id="capturePhotoBtn";button.type="button";button.className="primary-button in-app-shutter hidden";button.textContent="📷 촬영";controls.appendChild(button);}
 function ensureMountStyles(){
-  if($("spectrometerMountStyle"))return;
-  const style=document.createElement("style");
-  style.id="spectrometerMountStyle";
-  style.textContent=`
-    .mount-orientation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-    .in-app-shutter{grid-column:1/-1;min-height:64px;font-size:18px;margin-top:8px}
-    html.spectrometer-180,html.spectrometer-180 body{width:100%;height:100%;overflow:hidden}
-    html.spectrometer-180 body{position:fixed;inset:0;overflow-y:auto;overscroll-behavior:none;transform:rotate(180deg);transform-origin:50% 50%;-webkit-overflow-scrolling:touch}
-    html.spectrometer-180 #cameraPreview{transform:none}
-    @media(max-width:640px){.mount-orientation-grid{grid-template-columns:1fr}}
-  `;
+  if($("spectrometerMountStyle"))return;const style=document.createElement("style");style.id="spectrometerMountStyle";
+  style.textContent=`.mount-orientation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.in-app-shutter{grid-column:1/-1;min-height:64px;font-size:18px;margin-top:8px}html.spectrometer-180,html.spectrometer-180 body{width:100%;height:100%;overflow:hidden}html.spectrometer-180 body{position:fixed;inset:0;overflow-y:auto;overscroll-behavior:none;transform:rotate(180deg);transform-origin:50% 50%;-webkit-overflow-scrolling:touch}html.spectrometer-180 .in-app-shutter{position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px);left:16px;right:16px;width:auto;z-index:10020;box-shadow:0 12px 32px rgba(15,23,42,.28)}@media(max-width:640px){.mount-orientation-grid{grid-template-columns:1fr}}`;
   document.head.appendChild(style);
 }
-function selectMountOrientation(mode){
-  if(state.session)return;
-  state.mountOrientation=mode==="mounted180"?"mounted180":"normal";
-  const mounted=state.mountOrientation==="mounted180";
-  const normalBtn=$("mountNormalBtn"), mountedBtn=$("mount180Btn");
-  normalBtn?.classList.toggle("selected",!mounted);
-  mountedBtn?.classList.toggle("selected",mounted);
-  const normalCheck=normalBtn?.querySelector(".mode-check");
-  const mountedCheck=mountedBtn?.querySelector(".mode-check");
-  if(normalCheck)normalCheck.textContent=!mounted?"선택됨":"선택";
-  if(mountedCheck)mountedCheck.textContent=mounted?"선택됨":"선택";
-  applyMountOrientation();
-}
-function applyMountOrientation(){
-  const mounted=(state.session?.mountOrientation || state.mountOrientation)==="mounted180";
-  document.documentElement.classList.toggle("spectrometer-180",mounted);
-  requestAnimationFrame(()=>{
-    if(mounted){document.body.scrollTop=0;}else{window.scrollTo({top:0,behavior:"auto"});}
-  });
-}
-function setMountControlsDisabled(disabled){
-  if($("mountNormalBtn"))$("mountNormalBtn").disabled=disabled;
-  if($("mount180Btn"))$("mount180Btn").disabled=disabled;
-}
+function selectMountOrientation(mode){if(state.session)return;state.mountOrientation=mode==="mounted180"?"mounted180":"normal";const mounted=state.mountOrientation==="mounted180",normalBtn=$("mountNormalBtn"),mountedBtn=$("mount180Btn");normalBtn?.classList.toggle("selected",!mounted);mountedBtn?.classList.toggle("selected",mounted);const normalCheck=normalBtn?.querySelector(".mode-check"),mountedCheck=mountedBtn?.querySelector(".mode-check");if(normalCheck)normalCheck.textContent=!mounted?"선택됨":"선택";if(mountedCheck)mountedCheck.textContent=mounted?"선택됨":"선택";applyMountOrientation();}
+function applyMountOrientation(){const mounted=(state.session?.mountOrientation||state.mountOrientation)==="mounted180";document.documentElement.classList.toggle("spectrometer-180",mounted);requestAnimationFrame(()=>{if(mounted){document.body.scrollTop=0;}else{window.scrollTo({top:0,behavior:"auto"});}});}
+function setMountControlsDisabled(disabled){if($("mountNormalBtn"))$("mountNormalBtn").disabled=disabled;if($("mount180Btn"))$("mount180Btn").disabled=disabled;}
 function startSession(type){
-  const ref=getLatestReference();
-  if(type==="unknown"){
-    if(!ref){msg($("statusMessage"),"먼저 기준 측정(Blank + 5종)을 완료하세요.","error");return;}
-    const warnings=[]; if(isReferenceExpired(ref)) warnings.push("기준 측정 후 4시간이 지났습니다."); if(ref.lightRestartedAt) warnings.push("광원이 재가동된 것으로 표시되어 있습니다.");
-    if(warnings.length && !confirm(`${warnings.join("\n")}\n정확도를 위해 기준 재측정을 권장합니다. 기존 기준으로 계속할까요?`)) return;
-  }
-  resetRoiInputsToInitial();
-  state.session=createSession({projectName:$("projectName").value,sessionName:$("sessionName").value,lightSource:$("lightSource").value,measurementMode:state.selectedMode,sessionType:type,unknownNumber:type==="unknown"?getNextUnknownNumber():null});
-  state.session.mountOrientation=state.mountOrientation;
-  state.session.roiLocked=false;
-  state.session.roi=null;
-  state.session.roiSize=null;
-  setMountControlsDisabled(true);
-  saveSession(state.session);
-  applyMountOrientation();
-  openMeasurement();
+  const ref=getLatestReference();if(type==="unknown"){if(!ref){msg($("statusMessage"),"먼저 기준 측정(Blank + 5종)을 완료하세요.","error");return;}const warnings=[];if(isReferenceExpired(ref))warnings.push("기준 측정 후 4시간이 지났습니다.");if(ref.lightRestartedAt)warnings.push("광원이 재가동된 것으로 표시되어 있습니다.");if(warnings.length&&!confirm(`${warnings.join("\n")}\n정확도를 위해 기준 재측정을 권장합니다. 기존 기준으로 계속할까요?`))return;}
+  resetRoiInputsToInitial();state.session=createSession({projectName:$("projectName").value,sessionName:$("sessionName").value,lightSource:$("lightSource").value,measurementMode:state.selectedMode,sessionType:type,unknownNumber:type==="unknown"?getNextUnknownNumber():null});state.session.mountOrientation=state.mountOrientation;state.session.roiLocked=false;state.session.roi=null;state.session.roiSize=null;setMountControlsDisabled(true);saveSession(state.session);applyMountOrientation();openMeasurement();
 }
-function refreshReferencePanel(){
-  const ref=getLatestReference(), el=$("referenceStatus");
-  if(!ref){el.innerHTML='<strong>기준 데이터 없음</strong><span>먼저 기준 측정을 완료하세요.</span>';$("startUnknownBtn").disabled=true;return;}
-  $("startUnknownBtn").disabled=false; const age=getReferenceAgeMs(ref), remain=Math.max(0,REFERENCE_VALID_MS-age), expired=age>REFERENCE_VALID_MS;
-  const fmt=ms=>`${Math.floor(ms/3600000)}시간 ${Math.floor((ms%3600000)/60000)}분`;
-  const light=ref.lightRestartedAt?' · ⚠ 광원 재가동 표시됨':'';
-  const roiInfo=ref.roiSize?` · ROI ${ref.roiSize.width}×${ref.roiSize.height}px 고정`:'';
-  el.innerHTML=`<strong>${expired?'⚠ 유효 권장시간 초과':'✓ 기준 사용 가능'}</strong><span>측정 ${fmt(age)} 경과${expired?'':' · 남은 권장시간 '+fmt(remain)}${light}</span><small>${new Date(ref.createdAt).toLocaleString('ko-KR')}${roiInfo} · 이전 기준 ${Math.max(0,getReferenceHistory().length-1)}개 보관</small>`;
-}
-async function startPhotoPreview(){
-  try{
-    await camera.startPreview();
-    $("capturePhotoBtn").classList.remove("hidden");
-    $("cameraPhotoBtn").textContent="🎥 카메라 다시 시작";
-    $("continueToRoiBtn").disabled=true;
-    msg($("measurementMessage"),"카메라가 준비되었습니다. 분광기를 움직이지 말고 아래 촬영 버튼을 누르세요.","success");
-  }catch(e){msg($("measurementMessage"),e.message,"error")}
-}
+function refreshReferencePanel(){const ref=getLatestReference(),el=$("referenceStatus");if(!ref){el.innerHTML='<strong>기준 데이터 없음</strong><span>먼저 기준 측정을 완료하세요.</span>';$("startUnknownBtn").disabled=true;return;}$("startUnknownBtn").disabled=false;const age=getReferenceAgeMs(ref),remain=Math.max(0,REFERENCE_VALID_MS-age),expired=age>REFERENCE_VALID_MS;const fmt=ms=>`${Math.floor(ms/3600000)}시간 ${Math.floor((ms%3600000)/60000)}분`;const light=ref.lightRestartedAt?' · ⚠ 광원 재가동 표시됨':'';const roiInfo=ref.roiSize?` · ROI ${ref.roiSize.width}×${ref.roiSize.height}px 고정`:'';el.innerHTML=`<strong>${expired?'⚠ 유효 권장시간 초과':'✓ 기준 사용 가능'}</strong><span>측정 ${fmt(age)} 경과${expired?'':' · 남은 권장시간 '+fmt(remain)}${light}</span><small>${new Date(ref.createdAt).toLocaleString('ko-KR')}${roiInfo} · 이전 기준 ${Math.max(0,getReferenceHistory().length-1)}개 보관</small>`;}
+async function startPhotoPreview(){try{await camera.startPreview();$("capturePhotoBtn").classList.remove("hidden");$("cameraPhotoBtn").textContent="🎥 카메라 다시 시작";$("continueToRoiBtn").disabled=true;msg($("measurementMessage"),"카메라가 준비되었습니다. 분광기를 움직이지 말고 아래 촬영 버튼을 누르세요.","success");}catch(e){msg($("measurementMessage"),e.message,"error")}}
 async function capturePhotoFromPreview(){
-  try{
-    const video=$("cameraPreview");
-    if(!camera.isPreviewActive() || video.videoWidth<=0 || video.videoHeight<=0)throw new Error("먼저 카메라 미리보기를 시작하세요.");
-    const canvas=document.createElement("canvas");
-    canvas.width=video.videoWidth;
-    canvas.height=video.videoHeight;
-    const context=canvas.getContext("2d");
-    if(!context)throw new Error("촬영 이미지를 생성하지 못했습니다.");
-    context.drawImage(video,0,0,canvas.width,canvas.height);
-    const image=await loadCanvasImage(canvas);
-    state.imageElement=image;
-    camera.stopStream();
-    const spectrumImage=$("spectrumImage");
-    spectrumImage.src=image.src;
-    spectrumImage.classList.remove("hidden");
-    video.classList.add("hidden");
-    $("previewPlaceholder").classList.add("hidden");
-    $("capturePhotoBtn").classList.add("hidden");
-    $("cameraPhotoBtn").textContent="📷 다시 촬영";
-    $("continueToRoiBtn").disabled=false;
-    msg($("measurementMessage"),"사진 촬영이 완료되었습니다. 이미지를 확인한 뒤 ROI 설정으로 이동하세요.","success");
-  }catch(e){msg($("measurementMessage"),e.message,"error")}
+  try{const video=$("cameraPreview");if(!camera.isPreviewActive()||video.videoWidth<=0||video.videoHeight<=0)throw new Error("먼저 카메라 미리보기를 시작하세요.");const canvas=document.createElement("canvas");canvas.width=video.videoWidth;canvas.height=video.videoHeight;const context=canvas.getContext("2d");if(!context)throw new Error("촬영 이미지를 생성하지 못했습니다.");context.drawImage(video,0,0,canvas.width,canvas.height);const image=await loadCanvasImage(canvas);state.imageElement=image;camera.stopStream();const spectrumImage=$("spectrumImage");spectrumImage.src=image.src;spectrumImage.classList.remove("hidden");video.classList.add("hidden");$("previewPlaceholder").classList.add("hidden");$("capturePhotoBtn").classList.add("hidden");$("cameraPhotoBtn").textContent="📷 다시 촬영";$("continueToRoiBtn").disabled=false;msg($("measurementMessage"),"사진 촬영이 완료되었습니다. 이미지를 확인한 뒤 ROI 설정으로 이동하세요.","success");}catch(e){msg($("measurementMessage"),e.message,"error")}
 }
-function loadCanvasImage(canvas){
-  return new Promise((resolve,reject)=>{
-    const image=new Image();
-    image.onload=()=>resolve(image);
-    image.onerror=()=>reject(new Error("촬영 이미지를 불러오지 못했습니다."));
-    image.src=canvas.toDataURL("image/png");
-  });
-}
-async function handlePhoto(e){
-  try{
-    state.imageElement=await camera.loadSelectedImage(e);
-    resetPhotoCaptureUi(false);
-    $("continueToRoiBtn").disabled=false;
-  }catch(err){msg($("measurementMessage"),err.message,"error")}
-}
-function resetPhotoCaptureUi(resetLabel=true){
-  $("capturePhotoBtn")?.classList.add("hidden");
-  if(resetLabel && $("cameraPhotoBtn"))$("cameraPhotoBtn").textContent="📷 카메라 미리보기";
-}
-function openMeasurement(){
-  camera.reset();
-  resetPhotoCaptureUi();
-  state.imageElement=null;state.analysisResult=null;
-  const m=getCurrentMeasurement(state.session);
-  $("measurementTitle").textContent=`${m.displayName} 측정`;
-  $("measurementInstruction").textContent=m.instruction;
-  $("measurementStep").textContent=`${m.stepNumber} / ${m.totalSteps}`;
-  $("measurementRepeat").textContent=`${m.repeatNumber} / 3회`;
-  $("photoControls").classList.toggle("hidden",state.session.measurementMode!=="photo");
-  $("videoControls").classList.toggle("hidden",state.session.measurementMode==="photo");
-  $("continueToRoiBtn").disabled=true;
-  showScreen("measurement");
-}
-function openRoi(){
-  if(!state.imageElement)return;
-  roiController.setImage(state.imageElement);
-  if(!state.session?.roiLocked){roiController.reset();}
-  showScreen("roi");
-  redrawRoiForCurrentState();
-  updateRoiUiForSession();
-}
-function requestRoiConfirmation(){if(!state.session || state.session.roiLocked)return;openRoiConfirmModal();}
-function confirmRoiForSession(){
-  if(!state.session || state.session.roiLocked)return;
-  roiController.lockSize();
-  if(!roiController.isSizeLocked())return;
-  try{
-    const roi=roiController.getRoi();
-    state.session.roi={...roi};
-    state.session.roiSize={width:roi.width,height:roi.height};
-    state.session.roiLocked=true;
-    saveSession(state.session);
-    updateRoiUiForSession();
-    renderLockedRoiView();
-    msg($("roiMessage"),"ROI 확정됨 · 세션 종료까지 고정됩니다.","success");
-  }catch(e){msg($("roiMessage"),e.message,"error")}
-}
-function updateRoiUiForSession(){
-  const locked=Boolean(state.session?.roiLocked);
-  const lockBtn=$("lockRoiSizeBtn"), analyzeBtn=$("confirmRoiBtn"), returnBtn=$("returnToRoiBtn");
-  const help=document.querySelector(".roi-help"), nudgePanel=document.querySelector(".roi-nudge-panel");
-  if(locked){
-    lockBtn.disabled=true;lockBtn.textContent="ROI 확정됨";analyzeBtn.disabled=false;
-    if(returnBtn)returnBtn.textContent="확정 ROI 확인하기";
-    if(help)help.textContent="ROI 확정됨 · 세션 종료까지 고정됩니다. 같은 위치와 크기의 ROI가 현재 세션의 모든 측정에 적용됩니다.";
-    if(nudgePanel)nudgePanel.classList.add("hidden");
-    $("roiWidthInput").disabled=true;$("roiHeightInput").disabled=true;
-  }else{
-    lockBtn.disabled=false;lockBtn.textContent="ROI 확정";analyzeBtn.disabled=true;
-    if(returnBtn)returnBtn.textContent="ROI 위치 다시 조정하기";
-    if(help)help.textContent="숫자 입력과 노란색 조절점으로 크기를 바꾸고, ROI 영역을 드래그해 위치를 조정한 뒤 ROI를 확정하세요. 확정 후에는 세션 종료까지 변경할 수 없습니다.";
-    if(nudgePanel)nudgePanel.classList.remove("hidden");
-  }
-}
-function redrawRoiForCurrentState(){if(state.session?.roiLocked){renderLockedRoiView();}else{roiController.draw();}}
-function renderLockedRoiView(){
-  const canvas=$("roiCanvas"), image=state.imageElement, roi=state.session?.roi;
-  if(!canvas || !image || !roi)return;
-  const context=canvas.getContext("2d");if(!context)return;
-  const sourceWidth=image.naturalWidth || image.width, sourceHeight=image.naturalHeight || image.height;
-  if(!sourceWidth || !sourceHeight)return;
-  const parentWidth=canvas.parentElement?.clientWidth || 320;
-  const availableWidth=Math.min(860,Math.max(280,parentWidth-4));
-  const scale=Math.min(1,availableWidth/sourceWidth);
-  const displayWidth=Math.max(1,Math.round(sourceWidth*scale)), displayHeight=Math.max(1,Math.round(sourceHeight*scale));
-  if(canvas.width!==displayWidth)canvas.width=displayWidth;if(canvas.height!==displayHeight)canvas.height=displayHeight;
-  context.clearRect(0,0,displayWidth,displayHeight);context.drawImage(image,0,0,displayWidth,displayHeight);
-  const x=roi.x*scale,y=roi.y*scale,width=roi.width*scale,height=roi.height*scale;
-  context.save();context.fillStyle="rgba(0, 0, 0, 0.34)";
-  context.fillRect(0,0,displayWidth,y);context.fillRect(0,y+height,displayWidth,displayHeight-y-height);context.fillRect(0,y,x,height);context.fillRect(x+width,y,displayWidth-x-width,height);
-  context.strokeStyle="#facc15";context.lineWidth=Math.max(2,3*scale);context.setLineDash([8,5]);context.strokeRect(x,y,width,height);context.setLineDash([]);context.fillStyle="rgba(250, 204, 21, 0.12)";context.fillRect(x,y,width,height);context.restore();
-}
-function installRoiLockGuards(){
-  const canvas=$("roiCanvas");
-  const block=event=>{if(!state.session?.roiLocked)return;event.preventDefault();event.stopImmediatePropagation();};
-  canvas.addEventListener("pointerdown",block,true);canvas.addEventListener("keydown",block,true);
-  document.addEventListener("click",event=>{if(!state.session?.roiLocked)return;if(event.target.closest?.("[data-roi-nudge]"))block(event);},true);
-}
+function loadCanvasImage(canvas){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error("촬영 이미지를 불러오지 못했습니다."));image.src=canvas.toDataURL("image/png");});}
+async function handlePhoto(e){try{state.imageElement=await camera.loadSelectedImage(e);resetPhotoCaptureUi(false);$("continueToRoiBtn").disabled=false;}catch(err){msg($("measurementMessage"),err.message,"error")}}
+function resetPhotoCaptureUi(resetLabel=true){$("capturePhotoBtn")?.classList.add("hidden");if(resetLabel&&$("cameraPhotoBtn"))$("cameraPhotoBtn").textContent="📷 카메라 미리보기";}
+function openMeasurement(){camera.reset();resetPhotoCaptureUi();state.imageElement=null;state.analysisResult=null;const m=getCurrentMeasurement(state.session);$("measurementTitle").textContent=`${m.displayName} 측정`;$("measurementInstruction").textContent=m.instruction;$("measurementStep").textContent=`${m.stepNumber} / ${m.totalSteps}`;$("measurementRepeat").textContent=`${m.repeatNumber} / 3회`;$("photoControls").classList.toggle("hidden",state.session.measurementMode!=="photo");$("videoControls").classList.toggle("hidden",state.session.measurementMode==="photo");$("continueToRoiBtn").disabled=true;showScreen("measurement");}
+function openRoi(){if(!state.imageElement)return;roiController.setImage(state.imageElement);if(!state.session?.roiLocked)roiController.reset();showScreen("roi");redrawRoiForCurrentState();updateRoiUiForSession();}
+function requestRoiConfirmation(){if(!state.session||state.session.roiLocked)return;openRoiConfirmModal();}
+function confirmRoiForSession(){if(!state.session||state.session.roiLocked)return;roiController.lockSize();if(!roiController.isSizeLocked())return;try{const roi=roiController.getRoi();state.session.roi={...roi};state.session.roiSize={width:roi.width,height:roi.height};state.session.roiLocked=true;saveSession(state.session);updateRoiUiForSession();renderLockedRoiView();msg($("roiMessage"),"ROI 확정됨 · 세션 종료까지 고정됩니다.","success");}catch(e){msg($("roiMessage"),e.message,"error")}}
+function updateRoiUiForSession(){const locked=Boolean(state.session?.roiLocked),lockBtn=$("lockRoiSizeBtn"),analyzeBtn=$("confirmRoiBtn"),returnBtn=$("returnToRoiBtn"),help=document.querySelector(".roi-help"),nudgePanel=document.querySelector(".roi-nudge-panel");if(locked){lockBtn.disabled=true;lockBtn.textContent="ROI 확정됨";analyzeBtn.disabled=false;if(returnBtn)returnBtn.textContent="확정 ROI 확인하기";if(help)help.textContent="ROI 확정됨 · 세션 종료까지 고정됩니다. 같은 위치와 크기의 ROI가 현재 세션의 모든 측정에 적용됩니다.";if(nudgePanel)nudgePanel.classList.add("hidden");$("roiWidthInput").disabled=true;$("roiHeightInput").disabled=true;}else{lockBtn.disabled=false;lockBtn.textContent="ROI 확정";analyzeBtn.disabled=true;if(returnBtn)returnBtn.textContent="ROI 위치 다시 조정하기";if(help)help.textContent="숫자 입력과 노란색 조절점으로 크기를 바꾸고, ROI 영역을 드래그해 위치를 조정한 뒤 ROI를 확정하세요. 확정 후에는 세션 종료까지 변경할 수 없습니다.";if(nudgePanel)nudgePanel.classList.remove("hidden");}}
+function redrawRoiForCurrentState(){if(state.session?.roiLocked)renderLockedRoiView();else roiController.draw();}
+function renderLockedRoiView(){const canvas=$("roiCanvas"),image=state.imageElement,roi=state.session?.roi;if(!canvas||!image||!roi)return;const context=canvas.getContext("2d");if(!context)return;const sourceWidth=image.naturalWidth||image.width,sourceHeight=image.naturalHeight||image.height;if(!sourceWidth||!sourceHeight)return;const parentWidth=canvas.parentElement?.clientWidth||320,availableWidth=Math.min(860,Math.max(280,parentWidth-4)),scale=Math.min(1,availableWidth/sourceWidth),displayWidth=Math.max(1,Math.round(sourceWidth*scale)),displayHeight=Math.max(1,Math.round(sourceHeight*scale));if(canvas.width!==displayWidth)canvas.width=displayWidth;if(canvas.height!==displayHeight)canvas.height=displayHeight;context.clearRect(0,0,displayWidth,displayHeight);context.drawImage(image,0,0,displayWidth,displayHeight);const x=roi.x*scale,y=roi.y*scale,width=roi.width*scale,height=roi.height*scale;context.save();context.fillStyle="rgba(0, 0, 0, 0.34)";context.fillRect(0,0,displayWidth,y);context.fillRect(0,y+height,displayWidth,displayHeight-y-height);context.fillRect(0,y,x,height);context.fillRect(x+width,y,displayWidth-x-width,height);context.strokeStyle="#facc15";context.lineWidth=Math.max(2,3*scale);context.setLineDash([8,5]);context.strokeRect(x,y,width,height);context.setLineDash([]);context.fillStyle="rgba(250, 204, 21, 0.12)";context.fillRect(x,y,width,height);context.restore();}
+function installRoiLockGuards(){const canvas=$("roiCanvas");const block=event=>{if(!state.session?.roiLocked)return;event.preventDefault();event.stopImmediatePropagation();};canvas.addEventListener("pointerdown",block,true);canvas.addEventListener("keydown",block,true);document.addEventListener("click",event=>{if(!state.session?.roiLocked)return;if(event.target.closest?.("[data-roi-nudge]"))block(event);},true);}
 function installMountedPointerMirror(){
-  const canvas=$("roiCanvas");
-  if(!canvas)return;
-  const mirror=(event,target)=>{
-    if((state.session?.mountOrientation || state.mountOrientation)!=="mounted180")return;
-    if(mirroredPointerEvents.has(event))return;
-    if(event.type==="pointerdown" && event.target!==canvas)return;
-    const rect=canvas.getBoundingClientRect();
-    if(rect.width<=0 || rect.height<=0)return;
-    const mirroredX=rect.left+rect.right-event.clientX;
-    const mirroredY=rect.top+rect.bottom-event.clientY;
-    let synthetic;
-    try{
-      synthetic=new PointerEvent(event.type,{bubbles:true,cancelable:true,pointerId:event.pointerId,pointerType:event.pointerType,isPrimary:event.isPrimary,clientX:mirroredX,clientY:mirroredY,button:event.button,buttons:event.buttons,pressure:event.pressure,width:event.width,height:event.height,altKey:event.altKey,ctrlKey:event.ctrlKey,metaKey:event.metaKey,shiftKey:event.shiftKey});
-    }catch{return;}
-    mirroredPointerEvents.add(synthetic);
-    event.preventDefault();event.stopImmediatePropagation();
-    target.dispatchEvent(synthetic);
-  };
-  canvas.addEventListener("pointerdown",event=>mirror(event,canvas),true);
-  window.addEventListener("pointermove",event=>mirror(event,window),true);
-  window.addEventListener("pointerup",event=>mirror(event,window),true);
-  window.addEventListener("pointercancel",event=>mirror(event,window),true);
+  const canvas=$("roiCanvas");if(!canvas)return;
+  const mirror=(event,target)=>{if((state.session?.mountOrientation||state.mountOrientation)!=="mounted180")return;if(mirroredPointerEvents.has(event))return;if(event.type==="pointerdown"&&event.target!==canvas)return;const rect=canvas.getBoundingClientRect();if(rect.width<=0||rect.height<=0)return;const mirroredX=rect.left+rect.right-event.clientX,mirroredY=rect.top+rect.bottom-event.clientY;let synthetic;try{synthetic=new PointerEvent(event.type,{bubbles:true,cancelable:true,pointerId:event.pointerId,pointerType:event.pointerType,isPrimary:event.isPrimary,clientX:mirroredX,clientY:mirroredY,button:event.button,buttons:event.buttons,pressure:event.pressure,width:event.width,height:event.height,altKey:event.altKey,ctrlKey:event.ctrlKey,metaKey:event.metaKey,shiftKey:event.shiftKey});}catch{return;}mirroredPointerEvents.add(synthetic);event.preventDefault();event.stopImmediatePropagation();target.dispatchEvent(synthetic);};
+  canvas.addEventListener("pointerdown",event=>mirror(event,canvas),true);window.addEventListener("pointermove",event=>mirror(event,window),true);window.addEventListener("pointerup",event=>mirror(event,window),true);window.addEventListener("pointercancel",event=>mirror(event,window),true);
 }
-function resetRoiInputsToInitial(){
-  $("roiWidthInput").disabled=false;$("roiHeightInput").disabled=false;
-  $("roiWidthInput").value=String(initialRoi.width);$("roiHeightInput").value=String(initialRoi.height);
-  document.querySelector(".roi-nudge-panel")?.classList.remove("hidden");
-}
-function ensureRoiConfirmModal(){
-  if($("roiConfirmModal"))return;
-  const modal=document.createElement("div");modal.id="roiConfirmModal";modal.setAttribute("role","dialog");modal.setAttribute("aria-modal","true");modal.setAttribute("aria-labelledby","roiConfirmModalTitle");modal.hidden=true;
-  modal.innerHTML=`<div class="roi-modal-backdrop"></div><div class="roi-modal-panel"><h3 id="roiConfirmModalTitle">ROI를 확정하시겠습니까?</h3><p>확정 후에는 현재 세션이 종료될 때까지 ROI의 위치와 크기를 변경할 수 없습니다.</p><div class="roi-modal-actions"><button id="cancelRoiConfirmBtn" type="button">취소</button><button id="acceptRoiConfirmBtn" type="button">확정</button></div></div>`;
-  const style=document.createElement("style");style.textContent=`#roiConfirmModal[hidden]{display:none!important}#roiConfirmModal{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px}.roi-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.58)}.roi-modal-panel{position:relative;width:min(100%,420px);padding:24px;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.28)}.roi-modal-panel h3{margin:0 0 10px;font-size:20px}.roi-modal-panel p{margin:0;color:#64748b;line-height:1.6}.roi-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:22px}.roi-modal-actions button{min-height:48px;border-radius:12px;font-weight:800;cursor:pointer}.roi-modal-actions button:first-child{border:1px solid #cbd5e1;background:#fff;color:#334155}.roi-modal-actions button:last-child{border:0;background:#2563eb;color:#fff}`;
-  document.head.appendChild(style);document.body.appendChild(modal);
-  $("cancelRoiConfirmBtn").onclick=closeRoiConfirmModal;$("acceptRoiConfirmBtn").onclick=()=>{closeRoiConfirmModal();confirmRoiForSession();};modal.querySelector(".roi-modal-backdrop").onclick=closeRoiConfirmModal;
-}
+function resetRoiInputsToInitial(){$("roiWidthInput").disabled=false;$("roiHeightInput").disabled=false;$("roiWidthInput").value=String(initialRoi.width);$("roiHeightInput").value=String(initialRoi.height);document.querySelector(".roi-nudge-panel")?.classList.remove("hidden");}
+function ensureRoiConfirmModal(){if($("roiConfirmModal"))return;const modal=document.createElement("div");modal.id="roiConfirmModal";modal.setAttribute("role","dialog");modal.setAttribute("aria-modal","true");modal.setAttribute("aria-labelledby","roiConfirmModalTitle");modal.hidden=true;modal.innerHTML=`<div class="roi-modal-backdrop"></div><div class="roi-modal-panel"><h3 id="roiConfirmModalTitle">ROI를 확정하시겠습니까?</h3><p>확정 후에는 현재 세션이 종료될 때까지 ROI의 위치와 크기를 변경할 수 없습니다.</p><div class="roi-modal-actions"><button id="cancelRoiConfirmBtn" type="button">취소</button><button id="acceptRoiConfirmBtn" type="button">확정</button></div></div>`;const style=document.createElement("style");style.textContent=`#roiConfirmModal[hidden]{display:none!important}#roiConfirmModal{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px}.roi-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.58)}.roi-modal-panel{position:relative;width:min(100%,420px);padding:24px;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.28)}.roi-modal-panel h3{margin:0 0 10px;font-size:20px}.roi-modal-panel p{margin:0;color:#64748b;line-height:1.6}.roi-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:22px}.roi-modal-actions button{min-height:48px;border-radius:12px;font-weight:800;cursor:pointer}.roi-modal-actions button:first-child{border:1px solid #cbd5e1;background:#fff;color:#334155}.roi-modal-actions button:last-child{border:0;background:#2563eb;color:#fff}`;document.head.appendChild(style);document.body.appendChild(modal);$("cancelRoiConfirmBtn").onclick=closeRoiConfirmModal;$("acceptRoiConfirmBtn").onclick=()=>{closeRoiConfirmModal();confirmRoiForSession();};modal.querySelector(".roi-modal-backdrop").onclick=closeRoiConfirmModal;}
 function openRoiConfirmModal(){const modal=$("roiConfirmModal");modal.hidden=false;$("acceptRoiConfirmBtn")?.focus();}
 function closeRoiConfirmModal(){const modal=$("roiConfirmModal");if(modal)modal.hidden=true;}
-function analyze(){
-  try{
-    if(!state.session?.roiLocked){msg($("roiMessage"),"ROI를 먼저 확정하세요.","error");return;}
-    const roi=state.session.roi || roiController.getRoi();state.analysisResult=extractSpectrumFromImage(state.imageElement,roi,6);openAnalysis();
-  }catch(e){msg($("roiMessage"),e.message,"error")}
-}
+function analyze(){try{if(!state.session?.roiLocked){msg($("roiMessage"),"ROI를 먼저 확정하세요.","error");return;}const roi=state.session.roi||roiController.getRoi();state.analysisResult=extractSpectrumFromImage(state.imageElement,roi,6);openAnalysis();}catch(e){msg($("roiMessage"),e.message,"error")}}
 function openAnalysis(){const r=state.analysisResult,s=r.summary;$("analysisDataLength").textContent=s.dataLength;$("analysisRoiX").textContent=r.roi.x;$("analysisRoiY").textContent=r.roi.y;$("analysisRoiWidth").textContent=r.roi.width;$("analysisRoiHeight").textContent=r.roi.height;$("analysisPeakPixel").textContent=s.peakPixel;$("analysisPeakIntensity").textContent=Number(s.peakIntensity).toFixed(3);$("analysisMinimumPixel").textContent=s.minimumPixel;$("analysisIntensityRange").textContent=Number(s.intensityRange).toFixed(3);$("classificationCard").classList.add("hidden");$("newMeasurementBtn").textContent="측정 저장 후 다음";showScreen("analysis");drawRgbSpectrum($("rgbSpectrumCanvas"),r.spectrum);drawGraySpectrum($("graySpectrumCanvas"),r.spectrum);}
-function saveAndNext(){
-  if(!state.analysisResult)return;addMeasurement(state.session,state.analysisResult);const completed=advanceMeasurement(state.session);saveSession(state.session);
-  if(!completed){openMeasurement();return;}
-  if(state.session.sessionType==="reference"){
-    const ref=buildReference(state.session);saveReference(ref);clearSavedSession();alert("기준 측정이 완료되었습니다. 이 기준은 4시간 동안 사용을 권장합니다.");returnSetup();
-  }
-  state.lastClassification=classifyUnknown(state.session,getLatestReference());renderClassification(state.lastClassification);clearSavedSession();$("newMeasurementBtn").textContent="새 시료 분석하기";$("newMeasurementBtn").onclick=()=>{returnSetup();startSession("unknown")};
-}
-function avgArrays(records,key){const arrs=records.map(r=>r.spectrum[key]);const n=Math.min(...arrs.map(a=>a.length));return Array.from({length:n},(_,i)=>arrs.reduce((sum,a)=>sum+Number(a[i]),0)/arrs.length);}
+function saveAndNext(){if(!state.analysisResult)return;addMeasurement(state.session,state.analysisResult);const completed=advanceMeasurement(state.session);saveSession(state.session);if(!completed){openMeasurement();return;}if(state.session.sessionType==="reference"){const ref=buildReference(state.session);saveReference(ref);clearSavedSession();alert("기준 측정이 완료되었습니다. 이 기준은 4시간 동안 사용을 권장합니다.");returnSetup();}state.lastClassification=classifyUnknown(state.session,getLatestReference());renderClassification(state.lastClassification);clearSavedSession();$("newMeasurementBtn").textContent="새 시료 분석하기";$("newMeasurementBtn").onclick=()=>{returnSetup();startSession("unknown")};}
+function avgArrays(records,key){const arrs=records.map(r=>r.spectrum[key]),n=Math.min(...arrs.map(a=>a.length));return Array.from({length:n},(_,i)=>arrs.reduce((sum,a)=>sum+Number(a[i]),0)/arrs.length);}
 function relativeAtt(sample,blank){const n=Math.min(sample.length,blank.length);return Array.from({length:n},(_,i)=>{const b=blank[i];return Math.abs(b)<1e-9?0:1-sample[i]/b;});}
-function buildReference(session){const groups={};for(const name of ["Blank","PP","PET","PS","PA","PC"])groups[name]=session.measurements.filter(r=>r.sampleType===name);const blank=avgArrays(groups.Blank,"grayMean"),spectra={};for(const p of ["PP","PET","PS","PA","PC"])spectra[p]=relativeAtt(avgArrays(groups[p],"grayMean"),blank);return {id:`REF-${Date.now()}`,createdAt:new Date().toISOString(),projectName:session.projectName,sessionName:session.sessionName,lightSource:session.lightSource,measurementMode:session.measurementMode,mountOrientation:session.mountOrientation||"normal",blank,spectra,roi:session.roi?{...session.roi}:null,roiSize:session.roiSize?{...session.roiSize}:null,repeatCount:3,lightRestartedAt:null};}
+function buildReference(session){const groups={};for(const name of ["Blank","PP","PET","PS","PA","PC"])groups[name]=session.measurements.filter(r=>r.sampleType===name);const blank=avgArrays(groups.Blank,"grayMean"),spectra={};for(const p of ["PP","PET","PS","PA","PC"])spectra[p]=relativeAtt(avgArrays(groups[p],"grayMean"),blank);return{id:`REF-${Date.now()}`,createdAt:new Date().toISOString(),projectName:session.projectName,sessionName:session.sessionName,lightSource:session.lightSource,measurementMode:session.measurementMode,mountOrientation:session.mountOrientation||"normal",blank,spectra,roi:session.roi?{...session.roi}:null,roiSize:session.roiSize?{...session.roiSize}:null,repeatCount:3,lightRestartedAt:null};}
 function euclidean(a,b){const n=Math.min(a.length,b.length);let ss=0;for(let i=0;i<n;i++){const d=a[i]-b[i];ss+=d*d;}return Math.sqrt(ss/n);}
-function classifyUnknown(session,ref){const blank=ref.blank,unk=relativeAtt(avgArrays(session.measurements,"grayMean"),blank);const ranks=Object.entries(ref.spectra).map(([material,s])=>({material,distance:euclidean(unk,s)})).sort((a,b)=>a.distance-b.distance);const max=Math.max(...ranks.map(x=>x.distance)),min=Math.min(...ranks.map(x=>x.distance));ranks.forEach((x,i)=>{x.rank=i+1;x.bar=max===min?100:Math.round(28+72*(max-x.distance)/(max-min));});return {sample:`UNKNOWN-${String(session.unknownNumber).padStart(3,"0")}`,predicted:ranks[0].material,ranks};}
+function classifyUnknown(session,ref){const blank=ref.blank,unk=relativeAtt(avgArrays(session.measurements,"grayMean"),blank),ranks=Object.entries(ref.spectra).map(([material,s])=>({material,distance:euclidean(unk,s)})).sort((a,b)=>a.distance-b.distance),max=Math.max(...ranks.map(x=>x.distance)),min=Math.min(...ranks.map(x=>x.distance));ranks.forEach((x,i)=>{x.rank=i+1;x.bar=max===min?100:Math.round(28+72*(max-x.distance)/(max-min));});return{sample:`UNKNOWN-${String(session.unknownNumber).padStart(3,"0")}`,predicted:ranks[0].material,ranks};}
 function renderClassification(c){$("classificationCard").classList.remove("hidden");$("predictionMaterial").textContent=c.predicted;$("predictionSample").textContent=c.sample;$("similarityRanking").innerHTML=c.ranks.map(x=>`<div class="rank-row ${x.rank===1?'winner':''}"><span class="rank-badge">${x.rank}</span><strong>${x.material}</strong><div class="rank-track"><span style="width:${x.bar}%"></span></div><small>d=${x.distance.toFixed(4)}</small></div>`).join("");$("classificationNote").textContent="막대는 Euclidean distance의 상대적 순위를 한눈에 보기 위한 표시입니다. 실제 판정은 distance가 가장 작은 재질을 선택합니다.";}
 function downloadCsv(){if(!state.analysisResult)return;const m=getCurrentMeasurement(state.session);downloadSpectrumCsv({analysisResult:state.analysisResult,sessionName:state.session.sessionName,sampleName:m.displayName,repeatNumber:m.repeatNumber});}
-function showScreen(name){
-  Object.entries(screens).forEach(([n,e])=>e.classList.toggle("hidden",n!==name));
-  if((state.session?.mountOrientation || state.mountOrientation)==="mounted180"){document.body.scrollTo({top:0,behavior:"auto"});}else{window.scrollTo({top:0,behavior:"smooth"});}
-}
-function returnSetup(){
-  camera.reset();resetPhotoCaptureUi();state.session=null;state.imageElement=null;state.analysisResult=null;closeRoiConfirmModal();resetRoiInputsToInitial();setMountControlsDisabled(false);applyMountOrientation();refreshReferencePanel();showScreen("setup");$("newMeasurementBtn").onclick=saveAndNext;
-}
+function showScreen(name){Object.entries(screens).forEach(([n,e])=>e.classList.toggle("hidden",n!==name));if((state.session?.mountOrientation||state.mountOrientation)==="mounted180")document.body.scrollTo({top:0,behavior:"auto"});else window.scrollTo({top:0,behavior:"smooth"});}
+function returnSetup(){camera.reset();resetPhotoCaptureUi();state.session=null;state.imageElement=null;state.analysisResult=null;closeRoiConfirmModal();resetRoiInputsToInitial();setMountControlsDisabled(false);applyMountOrientation();refreshReferencePanel();showScreen("setup");$("newMeasurementBtn").onclick=saveAndNext;}
 function msg(el,text,type=""){el.className=`status-message${type?' '+type:''}`;el.textContent=text;}
