@@ -7,10 +7,41 @@ const SESSION_KEY = "msl-v2-current-session";
 const REFERENCE_KEY = "msl-v2-reference-library";
 const UNKNOWN_COUNTER_KEY = "msl-v2-unknown-counter";
 
+function setGlobalRoi(value) {
+  if (typeof window === "undefined") return;
+  window.__MSL_CURRENT_ROI = value ? { ...value } : null;
+}
+
+function getGlobalRoi() {
+  if (typeof window === "undefined") return null;
+  const value = window.__MSL_CURRENT_ROI;
+  return value ? { ...value } : null;
+}
+
+function attachLiveRoi(session, initialRoi = null) {
+  let storedRoi = initialRoi ? { ...initialRoi } : null;
+  setGlobalRoi(storedRoi);
+
+  Object.defineProperty(session, "roi", {
+    enumerable: true,
+    configurable: true,
+    get() {
+      const live = getGlobalRoi();
+      return live || (storedRoi ? { ...storedRoi } : null);
+    },
+    set(value) {
+      storedRoi = value ? { ...value } : null;
+      setGlobalRoi(storedRoi);
+    }
+  });
+
+  return session;
+}
+
 export function createSession({projectName, sessionName, lightSource, measurementMode, sessionType="reference", unknownNumber=null}) {
   const measurementOrder = sessionType === "reference" ? [...REFERENCE_ORDER] : ["Unknown"];
-  return {
-    version: "2.2.4",
+  const session = {
+    version: "2.3.2",
     projectName: (projectName || "2026 과학전람회").trim(),
     sessionName: (sessionName || "측정").trim(),
     lightSource: lightSource || "6500K LED",
@@ -22,12 +53,12 @@ export function createSession({projectName, sessionName, lightSource, measuremen
     currentStepIndex: 0,
     currentRepeatIndex: 0,
     measurements: [],
-    roi: null,
     roiSize: null,
     currentAnalysis: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
+  return attachLiveRoi(session, null);
 }
 
 export function getCurrentMeasurement(session) {
@@ -73,7 +104,17 @@ export function advanceMeasurement(session) {
 }
 
 export function saveSession(session) { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
-export function loadSession() { try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch { return null; } }
+export function loadSession() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SESSION_KEY));
+    if (!parsed) return null;
+    const roi = parsed.roi || null;
+    delete parsed.roi;
+    return attachLiveRoi(parsed, roi);
+  } catch {
+    return null;
+  }
+}
 export function clearSavedSession() { localStorage.removeItem(SESSION_KEY); }
 
 export function getNextUnknownNumber() {
