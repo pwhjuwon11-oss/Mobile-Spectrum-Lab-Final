@@ -1,17 +1,32 @@
 "use strict";
 
-/**
- * Canvas 크기를 현재 화면 폭과
- * 기기 해상도(DPR)에 맞춥니다.
- */
-function prepareCanvas(
-  canvas,
-  height = 250
-) {
+import {
+  loadSession,
+  getLatestReference
+} from "./session.js";
+
+const WAVELENGTH_MIN_NM = 400;
+const WAVELENGTH_MAX_NM = 700;
+
+// 포스터 기준 스펙트럼의 재질별 색상
+const MATERIAL_COLORS = {
+  PP: "#fd8824",
+  PET: "#2f74de",
+  PS: "#2bb16f",
+  PC: "#9b72c8",
+  PA: "#db7eb6"
+};
+
+const UNKNOWN_COLOR = "#374151";
+
+// UNKNOWN 3회 측정의 Gray Mean을 결과 비교 그래프용으로만 보관합니다.
+// 실제 분류 계산은 app.js의 기존 로직을 그대로 사용합니다.
+let capturedUnknownNumber = null;
+let capturedUnknownGrayMean = new Map();
+
+function prepareCanvas(canvas, height = 250) {
   if (!canvas) {
-    throw new Error(
-      "그래프 Canvas가 없습니다."
-    );
+    throw new Error("그래프 Canvas가 없습니다.");
   }
 
   const containerWidth =
@@ -19,53 +34,19 @@ function prepareCanvas(
     canvas.clientWidth ||
     320;
 
-  /*
-   * 기존처럼 최소 620px을 강제하지 않고
-   * 실제 부모 요소의 폭을 그대로 사용합니다.
-   */
-  const displayWidth =
-    Math.max(
-      1,
-      Math.floor(containerWidth)
-    );
+  const displayWidth = Math.max(1, Math.floor(containerWidth));
+  const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
 
-  const devicePixelRatio =
-    Math.max(
-      1,
-      window.devicePixelRatio || 1
-    );
+  canvas.width = Math.round(displayWidth * devicePixelRatio);
+  canvas.height = Math.round(height * devicePixelRatio);
+  canvas.style.width = "100%";
+  canvas.style.maxWidth = "100%";
+  canvas.style.height = `${height}px`;
 
-  /*
-   * 실제 Canvas 내부 픽셀은 DPR만큼 크게 만들어
-   * 고해상도로 렌더링합니다.
-   */
-  canvas.width =
-    Math.round(
-      displayWidth *
-      devicePixelRatio
-    );
-
-  canvas.height =
-    Math.round(
-      height *
-      devicePixelRatio
-    );
-
-  /*
-   * 화면에 표시되는 크기는
-   * 스마트폰 화면 폭에 맞춥니다.
-   */
-  canvas.style.width =
-    "100%";
-
-  canvas.style.maxWidth =
-    "100%";
-
-  canvas.style.height =
-    `${height}px`;
-
-  const context =
-    canvas.getContext("2d");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("그래프 Canvas 컨텍스트를 생성하지 못했습니다.");
+  }
 
   context.setTransform(
     devicePixelRatio,
@@ -83,13 +64,8 @@ function prepareCanvas(
   };
 }
 
-/**
- * RGB 그래프
- */
-export function drawRgbSpectrum(
-  canvas,
-  spectrum
-) {
+/** RGB 그래프 */
+export function drawRgbSpectrum(canvas, spectrum) {
   drawSpectrumChart(
     canvas,
     [
@@ -108,449 +84,301 @@ export function drawRgbSpectrum(
         values: spectrum.blueRaw,
         strokeStyle: "#2563eb"
       }
-    ]
+    ],
+    {
+      yMin: 0,
+      yMax: 255,
+      yDecimals: 0,
+      xLabel: "파장 (nm, 근사)"
+    }
   );
 }
 
-/**
- * Gray 그래프
- */
-export function drawGraySpectrum(
-  canvas,
-  spectrum
-) {
+/** Gray 그래프 */
+export function drawGraySpectrum(canvas, spectrum) {
+  captureUnknownGrayMeanForComparison(spectrum);
+
   drawSpectrumChart(
     canvas,
     [
       {
         name: "Gray BT.601",
-        values:
-          spectrum.grayBt601,
-        strokeStyle:
-          "#111827"
+        values: spectrum.grayBt601,
+        strokeStyle: "#111827"
       },
       {
         name: "Gray Mean",
-        values:
-          spectrum.grayMean,
-        strokeStyle:
-          "#7c3aed"
+        values: spectrum.grayMean,
+        strokeStyle: "#7c3aed"
       }
-    ]
+    ],
+    {
+      yMin: 0,
+      yMax: 255,
+      yDecimals: 0,
+      xLabel: "파장 (nm, 근사)"
+    }
   );
 }
 
 /**
  * 공통 스펙트럼 선 그래프
+ * X축은 ROI 첫 점을 400 nm, 마지막 점을 700 nm로 선형 대응합니다.
  */
 export function drawSpectrumChart(
   canvas,
-  seriesList
+  seriesList,
+  options = {}
 ) {
-  if (
-    !Array.isArray(seriesList) ||
-    seriesList.length === 0
-  ) {
-    throw new Error(
-      "그래프 데이터가 없습니다."
-    );
+  if (!Array.isArray(seriesList) || seriesList.length === 0) {
+    throw new Error("그래프 데이터가 없습니다.");
   }
 
-  /*
-   * RGB와 Gray 모두 동일한 높이
-   */
   const {
     context,
     displayWidth,
     displayHeight
   } = prepareCanvas(
     canvas,
-    250
+    Number(options.height || 250)
   );
 
-  context.clearRect(
-    0,
-    0,
-    displayWidth,
-    displayHeight
-  );
+  context.clearRect(0, 0, displayWidth, displayHeight);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, displayWidth, displayHeight);
 
-  context.fillStyle =
-    "#ffffff";
-
-  context.fillRect(
-    0,
-    0,
-    displayWidth,
-    displayHeight
-  );
-
-  /*
-   * 스마트폰에서도 축 숫자가 잘리지 않도록
-   * 좌우 여백을 확보합니다.
-   */
   const padding = {
-    left: 42,
+    left: options.yLabel ? 58 : 42,
     right: 16,
     top: 34,
-    bottom: 45
+    bottom: 48
   };
 
-  const graphWidth =
-    Math.max(
-      1,
-      displayWidth -
-        padding.left -
-        padding.right
-    );
+  const graphWidth = Math.max(
+    1,
+    displayWidth - padding.left - padding.right
+  );
 
-  const graphHeight =
-    Math.max(
-      1,
-      displayHeight -
-        padding.top -
-        padding.bottom
-    );
+  const graphHeight = Math.max(
+    1,
+    displayHeight - padding.top - padding.bottom
+  );
 
-  /*
-   * 실제 데이터 길이 확인
-   */
-  const dataLength =
-    Math.max(
-      ...seriesList.map(
-        series =>
-          Array.isArray(series.values)
-            ? series.values.length
-            : 0
-      )
-    );
+  const yMin = Number.isFinite(options.yMin)
+    ? Number(options.yMin)
+    : 0;
 
-  const maxPixel =
-    Math.max(
-      1,
-      dataLength - 1
-    );
+  const yMax = Number.isFinite(options.yMax)
+    ? Number(options.yMax)
+    : 255;
+
+  const yDecimals = Number.isInteger(options.yDecimals)
+    ? options.yDecimals
+    : 0;
 
   drawGrid(
     context,
     padding,
     graphWidth,
-    graphHeight
+    graphHeight,
+    yMin,
+    yMax,
+    yDecimals
   );
 
-  drawXAxis(
+  drawWavelengthXAxis(
     context,
     padding,
     graphWidth,
     graphHeight,
-    maxPixel
+    options.xLabel || "파장 (nm, 근사)"
   );
 
-  seriesList.forEach(
-    (
+  seriesList.forEach((series, seriesIndex) => {
+    drawSeries(
+      context,
       series,
-      seriesIndex
-    ) => {
-      drawSeries(
-        context,
-        series,
-        seriesIndex,
-        padding,
-        graphWidth,
-        graphHeight
-      );
-    }
-  );
+      seriesIndex,
+      padding,
+      graphWidth,
+      graphHeight,
+      yMin,
+      yMax
+    );
+  });
 
-  /*
-   * X축 제목
-   */
-  context.fillStyle =
-    "#64748b";
-
-  context.font =
-    "11px sans-serif";
-
-  context.textAlign =
-    "center";
-
-  context.fillText(
-    "ROI pixel",
-    padding.left +
-      graphWidth / 2,
-    displayHeight - 8
-  );
-
-  context.textAlign =
-    "start";
+  if (options.yLabel) {
+    drawYAxisLabel(
+      context,
+      String(options.yLabel),
+      padding,
+      graphHeight
+    );
+  }
 }
 
-/**
- * Y축 및 가로 격자
- */
 function drawGrid(
   context,
   padding,
   graphWidth,
-  graphHeight
+  graphHeight,
+  yMin,
+  yMax,
+  yDecimals
 ) {
-  context.strokeStyle =
-    "#e2e8f0";
-
-  context.fillStyle =
-    "#64748b";
-
+  context.strokeStyle = "#e2e8f0";
+  context.fillStyle = "#64748b";
   context.lineWidth = 1;
+  context.font = "10px sans-serif";
+  context.textAlign = "right";
 
-  context.font =
-    "10px sans-serif";
-
-  context.textAlign =
-    "right";
-
-  for (
-    let lineIndex = 0;
-    lineIndex <= 5;
-    lineIndex += 1
-  ) {
-    const ratio =
-      lineIndex / 5;
-
-    const y =
-      padding.top +
-      graphHeight *
-        ratio;
+  for (let lineIndex = 0; lineIndex <= 5; lineIndex += 1) {
+    const ratio = lineIndex / 5;
+    const y = padding.top + graphHeight * ratio;
 
     context.beginPath();
-
-    context.moveTo(
-      padding.left,
-      y
-    );
-
-    context.lineTo(
-      padding.left +
-        graphWidth,
-      y
-    );
-
+    context.moveTo(padding.left, y);
+    context.lineTo(padding.left + graphWidth, y);
     context.stroke();
 
-    const intensity =
-      255 -
-      Math.round(
-        255 * ratio
-      );
-
+    const value = yMax - (yMax - yMin) * ratio;
     context.fillText(
-      String(intensity),
+      Number(value).toFixed(yDecimals),
       padding.left - 7,
       y + 4
     );
   }
 
-  context.textAlign =
-    "start";
+  context.textAlign = "start";
 }
 
-/**
- * X축 눈금
- * 0 / 80 / 160 / 240 / 319
- */
-function drawXAxis(
+function drawWavelengthXAxis(
   context,
   padding,
   graphWidth,
   graphHeight,
-  maxPixel
+  xLabel
 ) {
-  const requestedTicks =
-    [0, 80, 160, 240, 319];
+  const tickRatios = [0, 0.25, 0.5, 0.75, 1];
 
-  /*
-   * 정상적인 320개 데이터에서는
-   * 그대로 0,80,160,240,319 표시.
-   * 데이터가 짧은 경우 범위를 벗어난
-   * 눈금은 자동 제외합니다.
-   */
-  const ticks =
-    requestedTicks.filter(
-      tick =>
-        tick <= maxPixel
-    );
-
-  /*
-   * 마지막 데이터 번호도
-   * 반드시 표시되도록 처리
-   */
-  if (
-    !ticks.includes(maxPixel) &&
-    maxPixel !== 319
-  ) {
-    ticks.push(maxPixel);
-  }
-
-  context.font =
-    "10px sans-serif";
-
-  context.fillStyle =
-    "#64748b";
-
-  context.strokeStyle =
-    "#cbd5e1";
-
+  context.font = "10px sans-serif";
+  context.fillStyle = "#64748b";
+  context.strokeStyle = "#cbd5e1";
   context.lineWidth = 1;
 
-  ticks.forEach(
-    tick => {
-      const ratio =
-        tick /
-        Math.max(
-          1,
-          maxPixel
-        );
+  tickRatios.forEach((ratio, index) => {
+    const x = padding.left + ratio * graphWidth;
+    const axisY = padding.top + graphHeight;
+    const wavelength = Math.round(
+      WAVELENGTH_MIN_NM +
+      ratio * (WAVELENGTH_MAX_NM - WAVELENGTH_MIN_NM)
+    );
 
-      const x =
-        padding.left +
-        ratio *
-          graphWidth;
+    context.beginPath();
+    context.moveTo(x, axisY);
+    context.lineTo(x, axisY + 5);
+    context.stroke();
 
-      const axisY =
-        padding.top +
-        graphHeight;
-
-      /*
-       * 짧은 세로 눈금선
-       */
-      context.beginPath();
-
-      context.moveTo(
-        x,
-        axisY
-      );
-
-      context.lineTo(
-        x,
-        axisY + 5
-      );
-
-      context.stroke();
-
-      /*
-       * 양 끝 숫자가 잘리지 않도록
-       * 정렬을 다르게 처리
-       */
-      if (tick === 0) {
-        context.textAlign =
-          "left";
-      } else if (
-        tick === maxPixel
-      ) {
-        context.textAlign =
-          "right";
-      } else {
-        context.textAlign =
-          "center";
-      }
-
-      context.fillText(
-        String(tick),
-        x,
-        axisY + 17
-      );
+    if (index === 0) {
+      context.textAlign = "left";
+    } else if (index === tickRatios.length - 1) {
+      context.textAlign = "right";
+    } else {
+      context.textAlign = "center";
     }
+
+    context.fillText(
+      String(wavelength),
+      x,
+      axisY + 17
+    );
+  });
+
+  context.fillStyle = "#64748b";
+  context.font = "11px sans-serif";
+  context.textAlign = "center";
+  context.fillText(
+    xLabel,
+    padding.left + graphWidth / 2,
+    padding.top + graphHeight + 37
   );
 
-  context.textAlign =
-    "start";
+  context.textAlign = "start";
 }
 
-/**
- * 스펙트럼 선
- */
+function drawYAxisLabel(
+  context,
+  text,
+  padding,
+  graphHeight
+) {
+  context.save();
+  context.fillStyle = "#64748b";
+  context.font = "10px sans-serif";
+  context.textAlign = "center";
+  context.translate(
+    12,
+    padding.top + graphHeight / 2
+  );
+  context.rotate(-Math.PI / 2);
+  context.fillText(text, 0, 0);
+  context.restore();
+}
+
 function drawSeries(
   context,
   series,
   seriesIndex,
   padding,
   graphWidth,
-  graphHeight
+  graphHeight,
+  yMin,
+  yMax
 ) {
-  const values =
-    series.values;
+  const values = series.values;
 
-  if (
-    !Array.isArray(values) ||
-    values.length === 0
-  ) {
+  if (!Array.isArray(values) || values.length === 0) {
     return;
   }
 
   context.beginPath();
-
-  context.strokeStyle =
-    series.strokeStyle;
-
-  context.lineWidth =
-    1.5;
-
-  context.lineJoin =
-    "round";
-
-  context.lineCap =
-    "round";
-
-  values.forEach(
-    (
-      value,
-      pointIndex
-    ) => {
-      const x =
-        padding.left +
-        (
-          pointIndex /
-          Math.max(
-            1,
-            values.length - 1
-          )
-        ) *
-          graphWidth;
-
-      const normalizedValue =
-        Math.min(
-          Math.max(
-            Number(value),
-            0
-          ),
-          255
-        );
-
-      const y =
-        padding.top +
-        (
-          1 -
-          normalizedValue /
-            255
-        ) *
-          graphHeight;
-
-      if (
-        pointIndex === 0
-      ) {
-        context.moveTo(
-          x,
-          y
-        );
-      } else {
-        context.lineTo(
-          x,
-          y
-        );
-      }
-    }
+  context.strokeStyle = series.strokeStyle || "#111827";
+  context.lineWidth = Number(series.lineWidth || 1.5);
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  context.setLineDash(
+    Array.isArray(series.lineDash)
+      ? series.lineDash
+      : []
   );
 
+  const range = Math.max(1e-12, yMax - yMin);
+
+  values.forEach((value, pointIndex) => {
+    const x =
+      padding.left +
+      (
+        pointIndex /
+        Math.max(1, values.length - 1)
+      ) * graphWidth;
+
+    const clamped = Math.min(
+      Math.max(Number(value), yMin),
+      yMax
+    );
+
+    const ratio = (clamped - yMin) / range;
+    const y = padding.top + (1 - ratio) * graphHeight;
+
+    if (pointIndex === 0) {
+      context.moveTo(x, y);
+    } else {
+      context.lineTo(x, y);
+    }
+  });
+
   context.stroke();
+  context.setLineDash([]);
 
   drawLegend(
     context,
@@ -560,42 +388,300 @@ function drawSeries(
   );
 }
 
-/**
- * 범례
- */
 function drawLegend(
   context,
   series,
   seriesIndex,
   padding
 ) {
-  /*
-   * 스마트폰에서도 RGB 3개 범례가
-   * 한 줄에 들어갈 수 있도록 간격 축소
-   */
-  const startX =
-    padding.left +
-    seriesIndex * 82;
+  const startX = padding.left + seriesIndex * 110;
+  const lineY = 16;
 
-  context.fillStyle =
-    series.strokeStyle;
-
-  context.fillRect(
-    startX,
-    14,
-    12,
-    3
+  context.save();
+  context.strokeStyle = series.strokeStyle || "#111827";
+  context.lineWidth = Number(series.lineWidth || 2);
+  context.setLineDash(
+    Array.isArray(series.lineDash)
+      ? series.lineDash
+      : []
   );
+  context.beginPath();
+  context.moveTo(startX, lineY);
+  context.lineTo(startX + 14, lineY);
+  context.stroke();
+  context.restore();
 
-  context.fillStyle =
-    "#334155";
-
-  context.font =
-    "10px sans-serif";
-
+  context.fillStyle = "#334155";
+  context.font = "10px sans-serif";
   context.fillText(
     series.name,
-    startX + 16,
+    startX + 18,
     19
   );
 }
+
+function minMaxNormalize(values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return [];
+  }
+
+  const finite = values
+    .map(Number)
+    .filter(Number.isFinite);
+
+  if (finite.length === 0) {
+    return values.map(() => 0);
+  }
+
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const range = max - min;
+
+  if (Math.abs(range) < 1e-12) {
+    return values.map(() => 0);
+  }
+
+  return values.map(
+    value => (Number(value) - min) / range
+  );
+}
+
+function averageArrays(arrays) {
+  if (!Array.isArray(arrays) || arrays.length === 0) {
+    return [];
+  }
+
+  const n = Math.min(...arrays.map(array => array.length));
+
+  return Array.from(
+    { length: n },
+    (_, index) =>
+      arrays.reduce(
+        (sum, array) => sum + Number(array[index]),
+        0
+      ) / arrays.length
+  );
+}
+
+function relativeAtt(sample, blank) {
+  const n = Math.min(sample.length, blank.length);
+
+  return Array.from({ length: n }, (_, index) => {
+    const b = Number(blank[index]);
+
+    return Math.abs(b) < 1e-9
+      ? 0
+      : 1 - Number(sample[index]) / b;
+  });
+}
+
+/**
+ * UNKNOWN 분석 화면에서 3회 Gray Mean을 모읍니다.
+ * 이 값은 결과의 비교 그래프에만 사용합니다.
+ */
+function captureUnknownGrayMeanForComparison(spectrum) {
+  try {
+    const session = loadSession();
+
+    if (!session || session.sessionType !== "unknown") {
+      return;
+    }
+
+    if (!Array.isArray(spectrum?.grayMean)) {
+      return;
+    }
+
+    if (capturedUnknownNumber !== session.unknownNumber) {
+      capturedUnknownNumber = session.unknownNumber;
+      capturedUnknownGrayMean = new Map();
+    }
+
+    const repeatIndex = Number(session.currentRepeatIndex || 0);
+
+    capturedUnknownGrayMean.set(
+      repeatIndex,
+      [...spectrum.grayMean]
+    );
+  } catch {
+    // 시각화 보조 기능이므로 측정/분류 흐름에는 영향을 주지 않습니다.
+  }
+}
+
+function ensureComparisonUi() {
+  const card = document.getElementById("classificationCard");
+
+  if (!card) {
+    return null;
+  }
+
+  let section = document.getElementById("spectrumComparisonSection");
+
+  if (section) {
+    return section;
+  }
+
+  section = document.createElement("div");
+  section.id = "spectrumComparisonSection";
+  section.style.marginTop = "24px";
+  section.innerHTML = `
+    <h4 style="margin:0 0 8px;">미지 시료와 기준 스펙트럼 비교</h4>
+    <div class="chart-container">
+      <canvas id="classificationSpectrumCanvas" class="spectrum-chart"></canvas>
+    </div>
+    <p id="classificationSpectrumNote" class="analysis-description" style="margin-top:10px;">
+      형태 비교를 위해 최소-최대 정규화하여 표시하였으며, 실제 판정은 정규화 전 Relative attenuation의 Euclidean distance를 사용함.
+    </p>
+  `;
+
+  const classificationNote = document.getElementById("classificationNote");
+
+  if (classificationNote) {
+    classificationNote.insertAdjacentElement(
+      "afterend",
+      section
+    );
+  } else {
+    card.appendChild(section);
+  }
+
+  return section;
+}
+
+function keepOnlyTopTwoRows() {
+  const ranking = document.getElementById("similarityRanking");
+
+  if (!ranking) {
+    return;
+  }
+
+  [...ranking.children].forEach((row, index) => {
+    row.style.display = index < 2 ? "" : "none";
+  });
+
+  const heading = ranking.previousElementSibling;
+
+  if (heading && /^H[1-6]$/.test(heading.tagName)) {
+    heading.textContent = "Top-2 유사도 순위";
+  }
+}
+
+function renderClassificationComparison() {
+  const card = document.getElementById("classificationCard");
+
+  if (!card || card.classList.contains("hidden")) {
+    return;
+  }
+
+  keepOnlyTopTwoRows();
+
+  const material = document
+    .getElementById("predictionMaterial")
+    ?.textContent
+    ?.trim();
+
+  if (!material || !MATERIAL_COLORS[material]) {
+    return;
+  }
+
+  const ref = getLatestReference();
+  const referenceSpectrum = ref?.spectra?.[material];
+
+  if (!Array.isArray(referenceSpectrum)) {
+    return;
+  }
+
+  const repeats = [0, 1, 2]
+    .map(index => capturedUnknownGrayMean.get(index))
+    .filter(Array.isArray);
+
+  if (
+    repeats.length < 3 ||
+    !Array.isArray(ref?.blank)
+  ) {
+    return;
+  }
+
+  const unknownGrayMean = averageArrays(repeats);
+  const unknownRelativeAttenuation = relativeAtt(
+    unknownGrayMean,
+    ref.blank
+  );
+
+  const normalizedReference = minMaxNormalize(referenceSpectrum);
+  const normalizedUnknown = minMaxNormalize(unknownRelativeAttenuation);
+
+  ensureComparisonUi();
+
+  const canvas = document.getElementById("classificationSpectrumCanvas");
+
+  if (!canvas) {
+    return;
+  }
+
+  drawSpectrumChart(
+    canvas,
+    [
+      {
+        name: `${material} 기준`,
+        values: normalizedReference,
+        strokeStyle: MATERIAL_COLORS[material],
+        lineWidth: 1.9
+      },
+      {
+        name: "UNKNOWN 평균",
+        values: normalizedUnknown,
+        strokeStyle: UNKNOWN_COLOR,
+        lineWidth: 3.0,
+        lineDash: [8, 5]
+      }
+    ],
+    {
+      yMin: 0,
+      yMax: 1,
+      yDecimals: 1,
+      yLabel: "정규화된 상대감쇠",
+      xLabel: "파장 (nm, 근사)",
+      height: 280
+    }
+  );
+}
+
+function installClassificationComparisonObserver() {
+  const install = () => {
+    const card = document.getElementById("classificationCard");
+
+    if (
+      !card ||
+      card.dataset.comparisonObserverInstalled === "true"
+    ) {
+      return;
+    }
+
+    card.dataset.comparisonObserverInstalled = "true";
+
+    const observer = new MutationObserver(() => {
+      if (!card.classList.contains("hidden")) {
+        requestAnimationFrame(renderClassificationComparison);
+      }
+    });
+
+    observer.observe(card, {
+      attributes: true,
+      attributeFilter: ["class"],
+      childList: true,
+      subtree: true
+    });
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      install,
+      { once: true }
+    );
+  } else {
+    install();
+  }
+}
+
+installClassificationComparisonObserver();
