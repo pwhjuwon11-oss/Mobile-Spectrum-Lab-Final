@@ -123,9 +123,64 @@ export function getNextUnknownNumber() {
   return next;
 }
 
+function averageChannel(records, channelName) {
+  if (!Array.isArray(records) || records.length === 0) return [];
+  const arrays = records
+    .map(record => record?.spectrum?.[channelName])
+    .filter(Array.isArray);
+  if (arrays.length === 0) return [];
+  const n = Math.min(...arrays.map(array => array.length));
+  return Array.from(
+    { length: n },
+    (_, index) => arrays.reduce((sum, array) => sum + Number(array[index]), 0) / arrays.length
+  );
+}
+
+function relativeAttenuation(sample, blank) {
+  const n = Math.min(sample.length, blank.length);
+  return Array.from({ length: n }, (_, index) => {
+    const b = Number(blank[index]);
+    return Math.abs(b) < 1e-9 ? 0 : 1 - Number(sample[index]) / b;
+  });
+}
+
+function addBt601DisplayReference(reference) {
+  try {
+    const session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (!session || session.sessionType !== "reference" || !Array.isArray(session.measurements)) {
+      return reference;
+    }
+
+    const groups = {};
+    for (const name of REFERENCE_ORDER) {
+      groups[name] = session.measurements.filter(record => record.sampleType === name);
+    }
+
+    const blankBt601 = averageChannel(groups.Blank, "grayBt601");
+    if (blankBt601.length === 0) return reference;
+
+    const spectraBt601 = {};
+    for (const material of ["PP", "PET", "PS", "PA", "PC"]) {
+      const sampleBt601 = averageChannel(groups[material], "grayBt601");
+      if (sampleBt601.length === 0) return reference;
+      spectraBt601[material] = relativeAttenuation(sampleBt601, blankBt601);
+    }
+
+    return {
+      ...reference,
+      blankBt601,
+      spectraBt601,
+      displaySpectrumChannel: "grayBt601"
+    };
+  } catch {
+    return reference;
+  }
+}
+
 export function saveReference(reference) {
   const all = getReferenceHistory();
-  all.unshift(reference);
+  const enrichedReference = addBt601DisplayReference(reference);
+  all.unshift(enrichedReference);
   localStorage.setItem(REFERENCE_KEY, JSON.stringify(all.slice(0, 30)));
 }
 export function getReferenceHistory() { try { return JSON.parse(localStorage.getItem(REFERENCE_KEY) || "[]"); } catch { return []; } }
