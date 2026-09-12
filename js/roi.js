@@ -28,7 +28,6 @@ export function createRoiController({
   updateInformation();
 
   function bindEvents() {
-    // app.js의 ROI 잠금 가드보다 먼저 capture 단계에서 처리합니다.
     canvas.addEventListener("pointerdown", handlePointerDownCapture, true);
     window.addEventListener("pointermove", handlePointerMoveCapture, true);
     window.addEventListener("pointerup", handlePointerUpCapture, true);
@@ -36,7 +35,6 @@ export function createRoiController({
     canvas.addEventListener("keydown", handleKeydownCapture, true);
     document.addEventListener("click", handleNudgeCapture, true);
 
-    // 크기 고정 전 일반 조작.
     canvas.addEventListener("pointerdown", startDrag);
     window.addEventListener("pointermove", moveDrag, { passive: false });
     window.addEventListener("pointerup", endDrag, { passive: false });
@@ -110,6 +108,8 @@ export function createRoiController({
         .roi-step-selector>div{display:flex;gap:6px}
         .roi-step-selector button{min-width:54px;min-height:36px;padding:7px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;font-weight:800}
         .roi-step-selector button.selected{border-color:#2563eb;background:#dbeafe;color:#1d4ed8}
+        html.spectrometer-180 #roiCanvas,
+        html.spectrometer-180 #roiZoomCanvas{transform:rotate(180deg);transform-origin:50% 50%}
         @media(max-width:680px){.roi-zoom-title{display:block}.roi-zoom-title span{display:block;margin-top:3px}.roi-nudge-grid button{width:52px!important;height:46px!important;font-size:20px!important}}
       `;
       document.head.appendChild(style);
@@ -130,7 +130,6 @@ export function createRoiController({
     const ih = getImageHeight();
     if (iw <= 0 || ih <= 0) throw new Error("ROI 이미지 크기를 확인할 수 없습니다.");
 
-    // UNKNOWN 새 세션/새로고침 후에도 app.js가 넣은 기준 ROI 크기를 자동 상속합니다.
     if (widthInput.disabled && heightInput.disabled && !sizeLocked) {
       roi.width = Math.min(Math.max(MINIMUM_ROI_SIZE, Math.round(Number(widthInput.value))), iw);
       roi.height = Math.min(Math.max(MINIMUM_ROI_SIZE, Math.round(Number(heightInput.value))), ih);
@@ -145,7 +144,6 @@ export function createRoiController({
     roi.y = clamp(roi.y, 0, Math.max(0, ih - roi.height));
     updateInformation();
 
-    // app.js가 잠금 화면을 그린 뒤 우리가 다시 그려 위치 조정을 활성화합니다.
     requestAnimationFrame(() => {
       document.querySelector(".roi-nudge-panel")?.classList.remove("hidden");
       draw();
@@ -239,11 +237,10 @@ export function createRoiController({
   function draw() {
     if (!imageElement) return;
     const iw = getImageWidth();
-    const ih = getImageHeight();
     const parentWidth = canvas.parentElement?.clientWidth || 320;
     displayScale = Math.min(1, Math.min(860, Math.max(280, parentWidth - 4)) / iw);
     const dw = Math.max(1, Math.round(iw * displayScale));
-    const dh = Math.max(1, Math.round(ih * displayScale));
+    const dh = Math.max(1, Math.round(getImageHeight() * displayScale));
     if (canvas.width !== dw) canvas.width = dw;
     if (canvas.height !== dh) canvas.height = dh;
     context.clearRect(0, 0, dw, dh);
@@ -342,12 +339,10 @@ export function createRoiController({
   function startDrag(event) {
     if (!imageElement) return;
     const point = sourcePoint(event);
-    const r = displayRoi();
     const comfortX = Math.max(0, 44 / Math.max(displayScale,.01) - roi.width) / 2;
     const comfortY = Math.max(0, 44 / Math.max(displayScale,.01) - roi.height) / 2;
     const inside = point.x >= roi.x - comfortX && point.x <= roi.x + roi.width + comfortX && point.y >= roi.y - comfortY && point.y <= roi.y + roi.height + comfortY;
 
-    // 잠긴 상태에서 ROI가 화면상 너무 작아 잡기 어렵다면 탭한 곳으로 중심을 옮겨 바로 드래그합니다.
     if (!inside && (sizeLocked || widthInput.disabled)) {
       roi.x = clamp(Math.round(point.x - roi.width / 2), 0, getImageWidth() - roi.width);
       roi.y = clamp(Math.round(point.y - roi.height / 2), 0, getImageHeight() - roi.height);
@@ -381,14 +376,8 @@ export function createRoiController({
 
   function sourcePoint(event) {
     const rect = canvas.getBoundingClientRect();
-    let cx = event.clientX;
-    let cy = event.clientY;
-    if (mounted180()) {
-      cx = rect.left + rect.right - cx;
-      cy = rect.top + rect.bottom - cy;
-    }
-    const x = (cx - rect.left) * (canvas.width / rect.width) / displayScale;
-    const y = (cy - rect.top) * (canvas.height / rect.height) / displayScale;
+    const x = (event.clientX - rect.left) * (canvas.width / rect.width) / displayScale;
+    const y = (event.clientY - rect.top) * (canvas.height / rect.height) / displayScale;
     return { x, y };
   }
 
