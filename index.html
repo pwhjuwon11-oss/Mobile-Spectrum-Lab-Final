@@ -20,7 +20,7 @@
 
   <link
     rel="stylesheet"
-    href="css/style.css?v=2.3.7"
+    href="css/style.css?v=2.3.8"
   >
 
   <style id="mounted180SpectrumDisplayFix">
@@ -30,11 +30,6 @@
       transform-origin: 50% 50% !important;
     }
 
-    /*
-     * 정지사진은 mounted180에서 이미 픽셀 방향이 정규화되어 있다.
-     * ROI 캔버스에 scaleX(-1)가 추가되면 파랑→빨강이 다시 빨강→파랑으로 뒤집힌다.
-     * app.js가 뒤에서 주입하는 규칙보다 높은 specificity로 ROI는 회전만 적용한다.
-     */
     html.spectrometer-180 body #roiCanvas,
     html.spectrometer-180 body #roiZoomCanvas {
       transform: rotate(180deg) !important;
@@ -58,7 +53,7 @@
     </div>
 
     <span class="version">
-      v2.3.7
+      v2.3.8
     </span>
   </header>
 
@@ -151,6 +146,6 @@
 
   <footer class="app-footer"><p>Mobile Spectrum Lab V2 · Research Prototype</p></footer>
 
-  <script type="module" src="js/app.js?v=2.3.7"></script>
+  <script type="module" src="js/app.js?v=2.3.8"></script>
 </body>
 </html>
