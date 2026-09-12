@@ -1,9 +1,9 @@
 "use strict";
 
-const DEFAULT_ROI_WIDTH = 320;
-const DEFAULT_ROI_HEIGHT = 40;
+const DEFAULT_ROI_WIDTH = 120;
+const DEFAULT_ROI_HEIGHT = 350;
 const MINIMUM_ROI_SIZE = 10;
-const ROI_STORAGE_KEY = "msl-v2-roi-size";
+const ROI_STORAGE_KEY = "msl-v2-roi-size-120x350";
 
 export function createRoiController({
   canvas, widthInput, heightInput, lockButton, confirmButton,
@@ -180,8 +180,8 @@ export function createRoiController({
     heightInput.disabled = false;
     lockButton.disabled = false;
     confirmButton.disabled = true;
-    roi.width = Math.min(normalize(widthInput.value, DEFAULT_ROI_WIDTH), iw);
-    roi.height = Math.min(normalize(heightInput.value, DEFAULT_ROI_HEIGHT), ih);
+    roi.width = Math.min(DEFAULT_ROI_WIDTH, iw);
+    roi.height = Math.min(DEFAULT_ROI_HEIGHT, ih);
     roi.x = Math.round((iw - roi.width) / 2);
     roi.y = Math.round((ih - roi.height) / 2);
     widthInput.value = roi.width;
