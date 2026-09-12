@@ -8,10 +8,10 @@ const VIDEO_FRAME_COUNT = Math.round(
 
 /*
  * 180° 장착 모드에서는 body 전체가 180° 회전한다.
- * 분석 데이터에는 손대지 않고 실시간 cameraPreview만 다시 180° 회전해
- * 화면상 스펙트럼 방향을 원래대로 보이게 한다.
- * Canvas drawImage(video, ...)에는 CSS transform이 적용되지 않으므로
- * 저장/분석되는 픽셀 데이터는 기존과 동일하다.
+ * 실시간 cameraPreview는 화면 표시만 다시 180° 회전한다.
+ * 정지사진은 iPhone 저장 방향과 Canvas 해석 방향이 달라질 수 있으므로,
+ * mounted180에서 불러온 직후 픽셀 자체를 180° 정규화하여
+ * 사진 표시·ROI·분석이 모두 같은 방향을 사용하도록 한다.
  */
 installPreviewOrientationStyle();
 
@@ -77,14 +77,28 @@ export function createCameraController({
     currentImageUrl = URL.createObjectURL(file);
 
     try {
-      currentImageElement = await loadImage(currentImageUrl);
+      let loadedImage = await loadImage(currentImageUrl);
+
+      if (isMounted180()) {
+        const normalizedBlob = await rotateImage180ToBlob(loadedImage);
+        releaseImageUrl();
+        currentImageUrl = URL.createObjectURL(normalizedBlob);
+        loadedImage = await loadImage(currentImageUrl);
+      }
+
+      currentImageElement = loadedImage;
     } catch {
       releaseImageUrl();
       throw new Error("선택한 이미지를 불러오지 못했습니다.");
     }
 
     showImage(currentImageElement);
-    showMessage(`이미지를 불러왔습니다: ${file.name}`, "success");
+    showMessage(
+      isMounted180()
+        ? `이미지를 불러왔습니다: ${file.name} · 180° 장착 방향 정규화 적용`
+        : `이미지를 불러왔습니다: ${file.name}`,
+      "success"
+    );
 
     return currentImageElement;
   }
@@ -186,7 +200,6 @@ export function createCameraController({
       throw new Error("영상 Canvas를 생성하지 못했습니다.");
     }
 
-    // 중요: CSS로 보이는 미리보기만 회전하며 실제 캡처 픽셀은 기존 그대로 사용한다.
     context.drawImage(videoElement, 0, 0, width, height);
 
     return canvas;
@@ -256,6 +269,41 @@ export function createCameraController({
 
     outputContext.putImageData(outputImageData, 0, 0);
     return outputCanvas;
+  }
+
+  function rotateImage180ToBlob(imageElement) {
+    const width = imageElement.naturalWidth || imageElement.width;
+    const height = imageElement.naturalHeight || imageElement.height;
+
+    if (width <= 0 || height <= 0) {
+      return Promise.reject(new Error("이미지 방향을 정규화할 수 없습니다."));
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return Promise.reject(new Error("이미지 방향 보정 Canvas를 생성하지 못했습니다."));
+    }
+
+    context.save();
+    context.translate(width, height);
+    context.rotate(Math.PI);
+    context.drawImage(imageElement, 0, 0, width, height);
+    context.restore();
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("이미지 방향 보정에 실패했습니다."));
+      }, "image/png");
+    });
+  }
+
+  function isMounted180() {
+    return document.documentElement.classList.contains("spectrometer-180");
   }
 
   async function canvasToImage(canvas) {
