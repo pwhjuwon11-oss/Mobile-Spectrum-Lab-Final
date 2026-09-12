@@ -109,7 +109,7 @@ export function createRoiController({
         .roi-step-selector button{min-width:54px;min-height:36px;padding:7px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;font-weight:800}
         .roi-step-selector button.selected{border-color:#2563eb;background:#dbeafe;color:#1d4ed8}
         html.spectrometer-180 #roiCanvas,
-        html.spectrometer-180 #roiZoomCanvas{transform:rotate(180deg);transform-origin:50% 50%}
+        html.spectrometer-180 #roiZoomCanvas{transform:none!important;transform-origin:50% 50%!important}
         @media(max-width:680px){.roi-zoom-title{display:block}.roi-zoom-title span{display:block;margin-top:3px}.roi-nudge-grid button{width:52px!important;height:46px!important;font-size:20px!important}}
       `;
       document.head.appendChild(style);
