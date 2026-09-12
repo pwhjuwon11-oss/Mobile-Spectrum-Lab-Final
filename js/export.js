@@ -53,7 +53,7 @@ function csvValue(value) {
 
 /**
  * 한 세션의 모든 측정 원자료를 하나의 CSV로 저장합니다.
- * 기준 세션이면 Blank + PP + PET + PS + PA + PC 각 3회, 총 18회가 포함됩니다.
+ * 기준 세션이면 총 18회, UNKNOWN 세션이면 총 3회가 포함됩니다.
  */
 export async function downloadSessionCsv(session) {
   if (!session || !Array.isArray(session.measurements) || session.measurements.length === 0) {
@@ -99,7 +99,11 @@ export async function downloadSessionCsv(session) {
   });
 
   const safeSessionName = sanitizeFileName(session.sessionName || "session");
-  const suffix = session.sessionType === "reference" ? "reference_18_measurements" : "unknown_3_measurements";
+  let suffix = "reference_18_measurements";
+  if (session.sessionType !== "reference") {
+    const unknownLabel = `UNKNOWN-${String(session.unknownNumber || 0).padStart(3, "0")}`;
+    suffix = `${unknownLabel}_3_measurements`;
+  }
   const fileName = `${safeSessionName}_${suffix}.csv`;
   return downloadBlob(fileName, "\uFEFF" + rows.join("\n"), "text/csv");
 }
