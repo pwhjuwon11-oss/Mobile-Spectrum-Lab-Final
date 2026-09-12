@@ -43,7 +43,7 @@ function attachLiveRoi(session, initialRoi = null) {
 export function createSession({projectName, sessionName, lightSource, measurementMode, sessionType="reference", unknownNumber=null}) {
   const measurementOrder = sessionType === "reference" ? [...REFERENCE_ORDER] : ["Unknown"];
   const session = {
-    version: "2.3.6",
+    version: "2.3.7",
     projectName: (projectName || "2026 과학전람회").trim(),
     sessionName: (sessionName || "측정").trim(),
     lightSource: lightSource || "6500K LED",
