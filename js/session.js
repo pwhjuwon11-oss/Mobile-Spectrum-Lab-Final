@@ -1,5 +1,7 @@
 "use strict";
 
+import { downloadSessionCsv } from "./export.js";
+
 export const REFERENCE_ORDER = ["Blank", "PP", "PET", "PS", "PA", "PC"];
 export const REPEAT_COUNT = 3;
 export const REFERENCE_VALID_MS = 4 * 60 * 60 * 1000;
@@ -41,7 +43,7 @@ function attachLiveRoi(session, initialRoi = null) {
 export function createSession({projectName, sessionName, lightSource, measurementMode, sessionType="reference", unknownNumber=null}) {
   const measurementOrder = sessionType === "reference" ? [...REFERENCE_ORDER] : ["Unknown"];
   const session = {
-    version: "2.3.2",
+    version: "2.3.3",
     projectName: (projectName || "2026 과학전람회").trim(),
     sessionName: (sessionName || "측정").trim(),
     lightSource: lightSource || "6500K LED",
@@ -182,7 +184,23 @@ export function saveReference(reference) {
   const enrichedReference = addBt601DisplayReference(reference);
   all.unshift(enrichedReference);
   localStorage.setItem(REFERENCE_KEY, JSON.stringify(all.slice(0, 30)));
+
+  // 마지막 기준측정 저장 버튼의 사용자 동작 안에서 실행되어
+  // iPhone의 공유 시트 → '파일에 저장'으로 전체 18회 CSV를 보관할 수 있습니다.
+  try {
+    const session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (
+      session?.sessionType === "reference" &&
+      Array.isArray(session.measurements) &&
+      session.measurements.length === REFERENCE_ORDER.length * REPEAT_COUNT
+    ) {
+      void downloadSessionCsv(session);
+    }
+  } catch (error) {
+    console.warn("기준 18회 CSV 저장을 시작하지 못했습니다.", error);
+  }
 }
+
 export function getReferenceHistory() { try { return JSON.parse(localStorage.getItem(REFERENCE_KEY) || "[]"); } catch { return []; } }
 export function getLatestReference() { return getReferenceHistory()[0] || null; }
 export function getReferenceAgeMs(ref) { return ref ? Date.now() - new Date(ref.createdAt).getTime() : Infinity; }
