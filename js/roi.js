@@ -1,9 +1,9 @@
 "use strict";
 
-const DEFAULT_ROI_WIDTH = 320;
-const DEFAULT_ROI_HEIGHT = 600;
+const DEFAULT_ROI_WIDTH = 265;
+const DEFAULT_ROI_HEIGHT = 700;
 const MINIMUM_ROI_SIZE = 10;
-const ROI_STORAGE_KEY = "msl-v2-roi-size-320x600";
+const ROI_STORAGE_KEY = "msl-v2-roi-size-265x700";
 
 export function createRoiController({
   canvas, widthInput, heightInput, lockButton, confirmButton,
