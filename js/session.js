@@ -102,7 +102,16 @@ export function advanceMeasurement(session) {
     session.currentStepIndex += 1;
   }
   session.updatedAt = new Date().toISOString();
-  return session.currentStepIndex >= session.measurementOrder.length;
+
+  const completed = session.currentStepIndex >= session.measurementOrder.length;
+
+  if (completed) {
+    void downloadSessionCsv(session).catch(error => {
+      console.warn("완료 세션 CSV 자동 저장 실패", error);
+    });
+  }
+
+  return completed;
 }
 
 export function saveSession(session) { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
@@ -184,21 +193,6 @@ export function saveReference(reference) {
   const enrichedReference = addBt601DisplayReference(reference);
   all.unshift(enrichedReference);
   localStorage.setItem(REFERENCE_KEY, JSON.stringify(all.slice(0, 30)));
-
-  // 마지막 기준측정 저장 버튼의 사용자 동작 안에서 실행되어
-  // iPhone의 공유 시트 → '파일에 저장'으로 전체 18회 CSV를 보관할 수 있습니다.
-  try {
-    const session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-    if (
-      session?.sessionType === "reference" &&
-      Array.isArray(session.measurements) &&
-      session.measurements.length === REFERENCE_ORDER.length * REPEAT_COUNT
-    ) {
-      void downloadSessionCsv(session);
-    }
-  } catch (error) {
-    console.warn("기준 18회 CSV 저장을 시작하지 못했습니다.", error);
-  }
 }
 
 export function getReferenceHistory() { try { return JSON.parse(localStorage.getItem(REFERENCE_KEY) || "[]"); } catch { return []; } }
