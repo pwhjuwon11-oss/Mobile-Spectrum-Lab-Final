@@ -1,15 +1,15 @@
 "use strict";
-import { createSession, getCurrentMeasurement, addMeasurement, advanceMeasurement, saveSession, clearSavedSession, getNextUnknownNumber, saveReference, getLatestReference, getReferenceHistory, getReferenceAgeMs, isReferenceExpired, markLightRestarted, REFERENCE_VALID_MS } from "./session.js";
-import { createCameraController } from "./camera.js";
-import { createRoiController } from "./roi.js";
-import { extractSpectrumFromImage } from "./analysis.js";
-import { drawRgbSpectrum, drawGraySpectrum } from "./chart.js";
-import { downloadSpectrumCsv } from "./export.js";
+import { createSession, getCurrentMeasurement, addMeasurement, advanceMeasurement, saveSession, clearSavedSession, getNextUnknownNumber, saveReference, getLatestReference, getReferenceHistory, getReferenceAgeMs, isReferenceExpired, markLightRestarted, REFERENCE_VALID_MS } from "./session.js?v=2.3.6";
+import { createCameraController } from "./camera.js?v=2.3.6";
+import { createRoiController } from "./roi.js?v=2.3.6";
+import { extractSpectrumFromImage } from "./analysis.js?v=2.3.6";
+import { drawRgbSpectrum, drawGraySpectrum } from "./chart.js?v=2.3.6";
+import { downloadSpectrumCsv } from "./export.js?v=2.3.6";
 
 const $ = id => document.getElementById(id);
 const screens={setup:$("setupScreen"),measurement:$("measurementScreen"),roi:$("roiScreen"),analysis:$("analysisScreen")};
 const state={selectedMode:"photo",mountOrientation:"normal",session:null,imageElement:null,analysisResult:null,lastClassification:null};
-const initialRoi={width:Number($("roiWidthInput")?.defaultValue || 320),height:Number($("roiHeightInput")?.defaultValue || 40)};
+const initialRoi={width:Number($("roiWidthInput")?.defaultValue || 320),height:Number($("roiHeightInput")?.defaultValue || 600)};
 const camera=createCameraController({cameraPreview:$("cameraPreview"),spectrumImage:$("spectrumImage"),previewPlaceholder:$("previewPlaceholder"),cameraPhotoInput:$("cameraPhotoInput"),galleryPhotoInput:$("galleryPhotoInput"),messageElement:$("measurementMessage")});
 const roiController=createRoiController({canvas:$("roiCanvas"),widthInput:$("roiWidthInput"),heightInput:$("roiHeightInput"),lockButton:$("lockRoiSizeBtn"),confirmButton:$("confirmRoiBtn"),messageElement:$("roiMessage"),xValue:$("roiXValue"),yValue:$("roiYValue"),widthValue:$("roiWidthValue"),heightValue:$("roiHeightValue"),sizeSummary:$("roiSizeSummary")});
 const mirroredPointerEvents=new WeakSet();
